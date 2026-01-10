@@ -1,355 +1,244 @@
 import os
-import re
-import math
-import pandas as pd
-import streamlit as st
-from googleapiclient.discovery import build
+import base64
+from pathlib import Path
 from datetime import datetime, timezone
-import streamlit as st
+import re
 
+import streamlit as st
+import pandas as pd
+from googleapiclient.discovery import build
+
+# --------------------------------------------------
+# Page config (MUST be first Streamlit command)
+# --------------------------------------------------
 st.set_page_config(
     page_title="YouTube Marketing Investment Intelligence Platform",
     layout="wide"
 )
 
+# --------------------------------------------------
+# Background image loader (LOCAL FILE)
+# --------------------------------------------------
+def set_local_background(image_path: str):
+    img_path = Path(image_path)
+    if not img_path.exists():
+        st.error(f"Background image not found: {image_path}")
+        return
 
-# ------------------------------
-# Helpers
-# ----------------------------
+    encoded = base64.b64encode(img_path.read_bytes()).decode()
+
+    st.markdown(
+        f"""
+        <style>
+        .stApp {{
+            background-image: url("data:image/png;base64,{encoded}");
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+            background-attachment: fixed;
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+
+# 👉 CHANGE PATH IF NEEDED
+set_local_background("assets/background.png")
+
+# --------------------------------------------------
+# UI Styling
+# --------------------------------------------------
+st.markdown("""
+<style>
+.content-box {
+    background: rgba(255, 255, 255, 0.90);
+    padding: 2rem;
+    border-radius: 14px;
+    margin-bottom: 2rem;
+}
+.small-note {
+    font-size: 0.85rem;
+    color: #555;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# --------------------------------------------------
+# Helper functions
+# --------------------------------------------------
 def tokenize(text: str) -> set:
     text = (text or "").lower()
-    text = re.sub(r"[^a-z0-9\s]", " ", text)
-    return set(t for t in text.split() if len(t) > 2)
+    text = re.sub(r"[^a-z0-9\\s]", " ", text)
+    return set(w for w in text.split() if len(w) > 2)
 
 def days_ago(iso_date: str) -> int:
     try:
         dt = datetime.fromisoformat(iso_date.replace("Z", "+00:00"))
-        now = datetime.now(timezone.utc)
-        return (now - dt).days
+        return (datetime.now(timezone.utc) - dt).days
     except Exception:
         return 9999
 
-def clamp(x, lo, hi):
-    return max(lo, min(hi, x))
-
-def safe_int(x, default=0):
+def safe_int(val, default=0):
     try:
-        return int(x)
+        return int(val)
     except Exception:
         return default
 
-# ----------------------------
-# Scoring
-# ----------------------------
-def compute_scores(keywords, channel_text, video_titles, subs, avg_views, uploads_90d, geo_lang_conf, inactive_days):
-    kw_tokens = set()
-    for kw in keywords:
-        kw_tokens |= tokenize(kw)
+# --------------------------------------------------
+# YouTube API setup
+# --------------------------------------------------
+API_KEY = os.getenv("YOUTUBE_API_KEY")
 
-    ch_tokens = tokenize(channel_text)
-    vid_tokens = set()
-    for t in video_titles:
-        vid_tokens |= tokenize(t)
-
-    # A) Relevance (0-40)
-    hits_channel = len(kw_tokens & ch_tokens)
-    hits_videos = len(kw_tokens & vid_tokens)
-    relevance = clamp((hits_channel * 2) + (hits_videos * 1), 0, 40)
-
-    # B) Engagement (0-25) proxy: avg_views / subs
-    ratio = (avg_views / max(subs, 1)) if subs else 0.0
-    # Map ratio to score
-    # 0.30+ -> 25, 0.15 -> 15, 0.05 -> 5
-    if ratio >= 0.30:
-        engagement = 25
-    else:
-        engagement = clamp((ratio / 0.30) * 25, 0, 25)
-
-    # C) Activity (0-20)
-    # 12 uploads/90d -> 20
-    activity = clamp((uploads_90d / 12.0) * 20, 0, 20)
-
-    # D) Geo/Lang confidence (0-10)
-    geo_lang = clamp(geo_lang_conf, 0, 10)
-
-    # E) Risk penalty (-15..0)
-    penalty = 0
-    if inactive_days > 120:
-        penalty -= 10
-    if ratio < 0.02:
-        penalty -= 5
-
-    total = clamp(relevance + engagement + activity + geo_lang + penalty, 0, 100)
-
-    return {
-        "relevance": relevance,
-        "engagement": engagement,
-        "activity": activity,
-        "geo_lang": geo_lang,
-        "penalty": penalty,
-        "match_score": total,
-        "engagement_ratio": ratio
-    }
-
-# ----------------------------
-# YouTube API fetch
-# ----------------------------
-@st.cache_data(ttl=3600, show_spinner=False)
-def search_channels(api_key, query, region_code, max_results=15):
-    youtube = build("youtube", "v3", developerKey=api_key)
-    res = youtube.search().list(
-        q=query,
-        part="snippet",
-        type="channel",
-        maxResults=max_results,
-        regionCode=region_code
-    ).execute()
-
-    channel_ids = [it["snippet"]["channelId"] for it in res.get("items", [])]
-    return channel_ids
-
-@st.cache_data(ttl=3600, show_spinner=False)
-def get_channels_stats(api_key, channel_ids):
-    youtube = build("youtube", "v3", developerKey=api_key)
-    chunks = [channel_ids[i:i+50] for i in range(0, len(channel_ids), 50)]
-    out = []
-    for ch in chunks:
-        res = youtube.channels().list(
-            part="snippet,statistics",
-            id=",".join(ch),
-            maxResults=50
-        ).execute()
-        out.extend(res.get("items", []))
-    return out
-
-@st.cache_data(ttl=3600, show_spinner=False)
-def get_recent_videos(api_key, channel_id, max_videos=10):
-    youtube = build("youtube", "v3", developerKey=api_key)
-
-    # Get uploads playlist
-    ch = youtube.channels().list(part="contentDetails", id=channel_id).execute()
-    items = ch.get("items", [])
-    if not items:
-        return []
-    uploads = items[0]["contentDetails"]["relatedPlaylists"]["uploads"]
-
-    vids = youtube.playlistItems().list(
-        part="snippet",
-        playlistId=uploads,
-        maxResults=max_videos
-    ).execute()
-
-    video_ids = []
-    videos_meta = []
-    for it in vids.get("items", []):
-        sn = it["snippet"]
-        vid = sn.get("resourceId", {}).get("videoId")
-        if vid:
-            video_ids.append(vid)
-            videos_meta.append({
-                "title": sn.get("title", ""),
-                "publishedAt": sn.get("publishedAt", "")
-            })
-
-    if not video_ids:
-        return []
-
-    vstats = youtube.videos().list(
-        part="statistics,snippet",
-        id=",".join(video_ids)
-    ).execute()
-
-    stats_map = {}
-    for v in vstats.get("items", []):
-        stats_map[v["id"]] = {
-            "views": safe_int(v.get("statistics", {}).get("viewCount", 0)),
-            "title": v.get("snippet", {}).get("title", ""),
-            "publishedAt": v.get("snippet", {}).get("publishedAt", "")
-        }
-
-    # Keep in original order
-    out = []
-    for vid in video_ids:
-        out.append(stats_map.get(vid, {"views": 0, "title": "", "publishedAt": ""}))
-    return out
-
-def infer_geo_lang_confidence(region, language, channel_title, channel_desc, video_titles):
-    # Very simple heuristic for MVP (0-10)
-    text = " ".join([channel_title or "", channel_desc or ""] + (video_titles or [])).lower()
-
-    score = 0
-    # region signals
-    if region.lower() in text:
-        score += 4
-    if region.lower() in ["usa", "united states", "us"] and any(s in text for s in ["usa", "united states", "us", "america"]):
-        score += 4
-
-    # language signals
-    if language.lower() in text:
-        score += 2
-    # cap
-    return clamp(score, 0, 10)
-
-# ----------------------------
-# Streamlit UI
-# ----------------------------
-st.set_page_config(page_title="YouTube Channel Investment Finder", layout="wide")
-st.title("📺 YouTube Channel Investment Finder")
-st.caption("Find the best YouTube channels to invest in based on niche relevance, engagement, activity, region & language.")
-
-api_key = os.getenv("YOUTUBE_API_KEY", "").strip()
-if not api_key:
-    st.error("Missing API key. Set environment variable YOUTUBE_API_KEY and rerun.")
+if not API_KEY:
+    st.error("❌ YouTube API key not found. Please set YOUTUBE_API_KEY as an environment variable.")
     st.stop()
 
+youtube = build("youtube", "v3", developerKey=API_KEY)
+
+# --------------------------------------------------
+# Sidebar Inputs
+# --------------------------------------------------
 with st.sidebar:
-    st.header("Inputs")
+    st.header("🔍 Campaign Inputs")
 
-    region = st.selectbox("Region", ["USA", "Canada", "India", "UK", "Australia"], index=0)
-    region_code_map = {"USA": "US", "Canada": "CA", "India": "IN", "UK": "GB", "Australia": "AU"}
-    region_code = region_code_map.get(region, "US")
+    region = st.selectbox("Region", ["USA", "Canada", "UK", "India", "Australia"])
+    region_map = {"USA": "US", "Canada": "CA", "UK": "GB", "India": "IN", "Australia": "AU"}
+    region_code = region_map[region]
 
-    language = st.selectbox("Language", ["English", "Spanish", "Hindi", "French"], index=0)
+    language = st.selectbox("Language", ["English", "Spanish", "Hindi", "French"])
 
     goal = st.radio(
         "Investment Goal",
-        ["Brand Awareness", "Conversions / Sales", "Product Demo / Reviews", "Local Reach", "Shorts Campaign"]
+        ["Brand Awareness", "Conversions", "Product Demo", "Local Reach", "Shorts Campaign"]
     )
 
-    keywords_str = st.text_area("Business Keywords (comma-separated)", "kitchen gadgets, cookware, meal prep")
-    keywords = [k.strip() for k in keywords_str.split(",") if k.strip()]
+    keywords_input = st.text_area(
+        "Business Keywords",
+        placeholder="kitchen gadgets, cookware, meal prep"
+    )
+    keywords = [k.strip() for k in keywords_input.split(",") if k.strip()]
 
     st.subheader("Filters")
-    min_subs = st.number_input("Min Subscribers", min_value=0, value=100000, step=10000)
-    max_subs = st.number_input("Max Subscribers (optional)", min_value=0, value=0, step=10000)
-    min_avg_views = st.number_input("Min Avg Views (last 10 videos)", min_value=0, value=0, step=1000)
-    recency = st.selectbox("Upload Recency", ["Any", "Last 30 days", "Last 90 days"], index=2)
+    min_subs = st.number_input("Minimum Subscribers", value=100000, step=10000)
+    min_avg_views = st.number_input("Minimum Avg Views (last 10 videos)", value=0, step=1000)
 
-    run = st.button("🔍 Find Channels", type="primary")
+    run_search = st.button("🚀 Find Channels")
 
-if run:
+# --------------------------------------------------
+# Main Content
+# --------------------------------------------------
+st.markdown('<div class="content-box">', unsafe_allow_html=True)
+
+st.title("📺 YouTube Marketing Investment Intelligence Platform")
+st.write(
+    "Identify **high-ROI YouTube channels** for marketing investment based on "
+    "region, language, niche relevance, engagement quality, and activity."
+)
+
+st.markdown(
+    "<p class='small-note'>⚠️ App is hosted on Render free tier. "
+    "Cold start may take 30–60 seconds.</p>",
+    unsafe_allow_html=True
+)
+
+st.markdown('</div>', unsafe_allow_html=True)
+
+# --------------------------------------------------
+# Run search
+# --------------------------------------------------
+if run_search:
     if not keywords:
-        st.warning("Please enter at least 1 keyword.")
+        st.warning("Please enter at least one keyword.")
         st.stop()
 
-    query = " ".join(keywords[:5])  # keep query short
-    with st.spinner("Searching channels..."):
-        channel_ids = search_channels(api_key, query, region_code, max_results=20)
+    with st.spinner("Searching YouTube channels..."):
+        search_response = youtube.search().list(
+            q=" ".join(keywords),
+            part="snippet",
+            type="channel",
+            maxResults=20,
+            regionCode=region_code
+        ).execute()
+
+    channel_ids = [item["snippet"]["channelId"] for item in search_response.get("items", [])]
 
     if not channel_ids:
         st.warning("No channels found. Try different keywords.")
         st.stop()
 
-    with st.spinner("Fetching channel stats..."):
-        channels = get_channels_stats(api_key, channel_ids)
+    channels_response = youtube.channels().list(
+        part="snippet,statistics",
+        id=",".join(channel_ids)
+    ).execute()
 
-    rows = []
-    with st.spinner("Fetching recent videos + scoring..."):
-        for ch in channels:
-            sn = ch.get("snippet", {})
-            stt = ch.get("statistics", {})
+    results = []
 
-            title = sn.get("title", "")
-            desc = sn.get("description", "")
-            channel_id = ch.get("id", "")
+    for ch in channels_response.get("items", []):
+        stats = ch["statistics"]
+        snippet = ch["snippet"]
 
-            subs = safe_int(stt.get("subscriberCount", 0))
-            total_views = safe_int(stt.get("viewCount", 0))
-            video_count = safe_int(stt.get("videoCount", 0))
+        subs = safe_int(stats.get("subscriberCount"))
+        if subs < min_subs:
+            continue
 
-            # Filters by subs
-            if subs < min_subs:
-                continue
-            if max_subs and subs > max_subs:
-                continue
+        channel_id = ch["id"]
 
-            recent = get_recent_videos(api_key, channel_id, max_videos=10)
-            video_titles = [v.get("title", "") for v in recent]
-            views_list = [safe_int(v.get("views", 0)) for v in recent]
-            avg_views = int(sum(views_list) / max(len(views_list), 1))
+        playlist_res = youtube.channels().list(
+            part="contentDetails",
+            id=channel_id
+        ).execute()
 
-            # Filter by avg views
-            if min_avg_views and avg_views < min_avg_views:
-                continue
+        uploads_id = playlist_res["items"][0]["contentDetails"]["relatedPlaylists"]["uploads"]
 
-            # Activity metrics
-            published_days = [days_ago(v.get("publishedAt", "")) for v in recent if v.get("publishedAt")]
-            inactive_days = min(published_days) if published_days else 9999
+        videos_res = youtube.playlistItems().list(
+            part="snippet",
+            playlistId=uploads_id,
+            maxResults=10
+        ).execute()
 
-            uploads_90d = sum(1 for d in published_days if d <= 90)
+        video_titles = []
+        video_ids = []
 
-            # Recency filter
-            if recency == "Last 30 days" and (inactive_days > 30):
-                continue
-            if recency == "Last 90 days" and (inactive_days > 90):
-                continue
+        for v in videos_res.get("items", []):
+            video_titles.append(v["snippet"]["title"])
+            video_ids.append(v["snippet"]["resourceId"]["videoId"])
 
-            geo_lang_conf = infer_geo_lang_confidence(region, language, title, desc, video_titles)
+        if not video_ids:
+            continue
 
-            scores = compute_scores(
-                keywords=keywords,
-                channel_text=f"{title} {desc}",
-                video_titles=video_titles,
-                subs=subs,
-                avg_views=avg_views,
-                uploads_90d=uploads_90d,
-                geo_lang_conf=geo_lang_conf,
-                inactive_days=inactive_days
-            )
+        video_stats = youtube.videos().list(
+            part="statistics",
+            id=",".join(video_ids)
+        ).execute()
 
-            # Badges
-            ratio = scores["engagement_ratio"]
-            if ratio >= 0.15:
-                badge = "🟢 High Engagement"
-            elif ratio >= 0.05:
-                badge = "🟡 Average Engagement"
-            else:
-                badge = "🔴 Low Engagement"
+        views = [safe_int(v["statistics"].get("viewCount")) for v in video_stats.get("items", [])]
+        avg_views = sum(views) // max(len(views), 1)
 
-            rows.append({
-                "Channel": title,
-                "Channel ID": channel_id,
-                "Subscribers": subs,
-                "Total Views": total_views,
-                "Avg Views (last 10)": avg_views,
-                "Uploads (last 90d)": uploads_90d,
-                "Inactive Days": inactive_days,
-                "Geo/Lang Confidence": scores["geo_lang"],
-                "Relevance": scores["relevance"],
-                "Engagement": scores["engagement"],
-                "Activity": scores["activity"],
-                "Penalty": scores["penalty"],
-                "Match Score": scores["match_score"],
-                "Badge": badge,
-                "URL": f"https://www.youtube.com/channel/{channel_id}"
-            })
+        if avg_views < min_avg_views:
+            continue
 
-    if not rows:
-        st.warning("No channels matched your filters. Try lowering min subs or min avg views.")
+        engagement_ratio = round(avg_views / max(subs, 1), 3)
+
+        results.append({
+            "Channel": snippet["title"],
+            "Subscribers": subs,
+            "Avg Views (Last 10)": avg_views,
+            "Engagement Ratio": engagement_ratio,
+            "Channel URL": f"https://www.youtube.com/channel/{channel_id}"
+        })
+
+    if not results:
+        st.warning("No channels matched your filters.")
         st.stop()
 
-    df = pd.DataFrame(rows).sort_values("Match Score", ascending=False)
+    df = pd.DataFrame(results).sort_values("Engagement Ratio", ascending=False)
 
-    st.subheader("✅ Ranked Channel Recommendations")
-    st.dataframe(
-        df[["Channel", "Subscribers", "Total Views", "Avg Views (last 10)", "Uploads (last 90d)", "Geo/Lang Confidence", "Match Score", "Badge", "URL"]],
-        use_container_width=True,
-        hide_index=True
-    )
-
+    st.markdown('<div class="content-box">', unsafe_allow_html=True)
+    st.subheader("✅ Recommended Channels")
+    st.dataframe(df, use_container_width=True)
     st.download_button(
         "⬇️ Download CSV",
-        data=df.to_csv(index=False).encode("utf-8"),
-        file_name="youtube_channel_recommendations.csv",
-        mime="text/csv"
+        df.to_csv(index=False),
+        file_name="youtube_channel_recommendations.csv"
     )
-
-    st.divider()
-    st.subheader("How scores are calculated (MVP)")
-    st.write("""
-- **Relevance (0–40):** keyword hits in channel text + recent video titles  
-- **Engagement (0–25):** avg views / subscribers  
-- **Activity (0–20):** upload count in last 90 days  
-- **Geo/Lang (0–10):** basic inference from text  
-- **Penalty (-15..0):** inactivity + very low engagement  
-""")
+    st.markdown('</div>', unsafe_allow_html=True)
