@@ -5,6 +5,7 @@ import base64
 from pathlib import Path
 from datetime import datetime, timezone
 import urllib.parse as urlparse
+from typing import Dict, List, Tuple
 
 import streamlit as st
 import pandas as pd
@@ -19,11 +20,11 @@ st.set_page_config(
 )
 
 # ==================================================
-# CSS (define classes you use + nice UI)
+# CSS (simple + you are using these class names)
 # ==================================================
-st.markdown("""
+st.markdown(
+    """
 <style>
-/* Cards */
 .content-box{
   background: rgba(255,255,255,0.96);
   padding: 22px;
@@ -43,7 +44,9 @@ st.markdown("""
   font-size: 0.92rem;
 }
 </style>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
 # ==================================================
 # Background image (local -> base64)
@@ -68,15 +71,15 @@ def set_local_background(image_path: str):
         }}
         </style>
         """,
-        unsafe_allow_html=True
+        unsafe_allow_html=True,
     )
 
 set_local_background("assets/background.png")
 
 # ==================================================
-# Country -> Languages + YouTube region code
+# Country -> languages + YouTube region code
 # ==================================================
-COUNTRY_LANGUAGE_MAP = {
+COUNTRY_LANGUAGE_MAP: Dict[str, List[str]] = {
     "USA": ["English", "Spanish"],
     "India": ["Hindi", "English", "Telugu", "Tamil", "Kannada", "Malayalam", "Marathi", "Bengali", "Gujarati", "Punjabi", "Urdu", "Odia"],
     "UK": ["English", "Welsh", "Scottish Gaelic", "Irish"],
@@ -85,30 +88,18 @@ COUNTRY_LANGUAGE_MAP = {
     "UAE": ["Arabic", "English", "Hindi", "Urdu"],
     "Singapore": ["English", "Mandarin", "Malay", "Tamil"],
 }
-COUNTRY_REGION_CODE = {"USA":"US","India":"IN","UK":"GB","Canada":"CA","Australia":"AU","UAE":"AE","Singapore":"SG"}
+COUNTRY_REGION_CODE = {"USA": "US", "India": "IN", "UK": "GB", "Canada": "CA", "Australia": "AU", "UAE": "AE", "Singapore": "SG"}
 
-# YouTube search relevanceLanguage codes (best-effort)
+# YouTube relevanceLanguage (best-effort)
 LANG_TO_YT_CODE = {
-    "English": "en",
-    "Spanish": "es",
-    "French": "fr",
-    "Hindi": "hi",
-    "Telugu": "te",
-    "Tamil": "ta",
-    "Kannada": "kn",
-    "Malayalam": "ml",
-    "Marathi": "mr",
-    "Bengali": "bn",
-    "Gujarati": "gu",
-    "Punjabi": "pa",
-    "Urdu": "ur",
-    "Odia": "or",
-    "Arabic": "ar",
-    "Mandarin": "zh",
-    "Malay": "ms",
+    "English": "en", "Spanish": "es", "French": "fr",
+    "Hindi": "hi", "Telugu": "te", "Tamil": "ta", "Kannada": "kn",
+    "Malayalam": "ml", "Marathi": "mr", "Bengali": "bn",
+    "Gujarati": "gu", "Punjabi": "pa", "Urdu": "ur", "Odia": "or",
+    "Arabic": "ar", "Mandarin": "zh", "Malay": "ms",
 }
 
-# Unicode script ranges for strict language filtering (high accuracy)
+# Strict script detection where possible (high accuracy)
 LANG_UNICODE_RANGES = {
     "Hindi": r"[\u0900-\u097F]",        # Devanagari
     "Marathi": r"[\u0900-\u097F]",      # Devanagari
@@ -124,7 +115,7 @@ LANG_UNICODE_RANGES = {
     "Arabic": r"[\u0600-\u06FF]",       # Arabic script
 }
 
-# Query hints (improve relevance)
+# Query hints to strengthen search relevance
 LANG_QUERY_HINTS = {
     "Spanish": " español en español",
     "French": " français en français",
@@ -160,68 +151,20 @@ def days_ago(iso_date: str) -> int:
     except Exception:
         return 9999
 
+def normalize_text(s: str) -> str:
+    return re.sub(r"\s+", " ", (s or "").strip().lower())
+
+def tokenize(s: str) -> List[str]:
+    s = normalize_text(s)
+    s = re.sub(r"[^a-z0-9\s]", " ", s)
+    return [t for t in s.split() if len(t) >= 3]
+
 def engagement_label(r: float) -> str:
     if r >= 0.15:
         return "🟢 High"
     if r >= 0.05:
         return "🟡 Average"
     return "🔴 Low"
-
-def infer_channel_type(title: str, desc: str, recent_titles: list[str]) -> str:
-    text = " ".join([title or "", desc or ""] + (recent_titles or [])).lower()
-    taxonomy = [
-        ("Tech & Gadgets", ["tech","iphone","android","smartphone","mobile","laptop","review","unboxing","gadget"]),
-        ("Cooking & Food", ["recipe","cooking","kitchen","chef","baking","food","meal prep","dosa","biryani"]),
-        ("Beauty & Fashion", ["makeup","skincare","beauty","fashion","outfit","haul"]),
-        ("Fitness & Health", ["fitness","workout","gym","yoga","health","diet"]),
-        ("Education", ["tutorial","learn","course","lecture","explained","how to","tips"]),
-        ("Finance & Business", ["finance","stock","invest","trading","business","marketing","money"]),
-        ("Entertainment", ["comedy","movie","cinema","music","funny","prank"]),
-        ("Travel", ["travel","vlog","trip","tour","hotel"]),
-        ("Gaming", ["gaming","gameplay","walkthrough","ps5","xbox","minecraft","fortnite"]),
-        ("News & Politics", ["news","politics","breaking","debate"]),
-    ]
-    best, best_score = "General", 0
-    for label, kws in taxonomy:
-        score = sum(1 for k in kws if k in text)
-        if score > best_score:
-            best, best_score = label, score
-    return best
-
-def channel_matches_language(video_titles: list[str], language: str) -> bool:
-    """
-    Enforce "selected language channels only".
-    - If language has a unique script: strict unicode check (high accuracy)
-    - If Latin-script language: best-effort heuristics + avoid non-latin scripts
-    """
-    titles_text = " ".join(video_titles or [])
-
-    # Strict script matching
-    pattern = LANG_UNICODE_RANGES.get(language)
-    if pattern:
-        return bool(re.search(pattern, titles_text))
-
-    t = titles_text.lower()
-
-    # Spanish heuristic
-    if language == "Spanish":
-        return (any(w in t for w in [" el ", " la ", " de ", " y ", " que ", " para ", " con "])
-                or any(c in t for c in "áéíóúñ"))
-
-    # French heuristic
-    if language == "French":
-        return (any(w in t for w in [" le ", " la ", " de ", " et ", " pour ", " avec ", " que "])
-                or any(c in t for c in "àâçéèêëîïôùûüÿœ"))
-
-    # English heuristic: allow if it doesn't contain other non-latin scripts
-    if language == "English":
-        return not bool(re.search(
-            r"[\u0600-\u06FF\u0900-\u097F\u0980-\u09FF\u0A00-\u0A7F\u0A80-\u0AFF\u0B00-\u0B7F\u0B80-\u0BFF\u0C00-\u0CFF\u0D00-\u0D7F]",
-            titles_text
-        ))
-
-    # Default: accept (for languages not covered)
-    return True
 
 def extract_channel_id_or_handle(text: str):
     if not text:
@@ -251,16 +194,68 @@ def resolve_channel_id(youtube_client, channel_input: str):
         except Exception:
             pass
 
-    resp = youtube_client.search().list(
-        q=channel_input,
-        part="snippet",
-        type="channel",
-        maxResults=1
-    ).execute()
+    resp = youtube_client.search().list(q=channel_input, part="snippet", type="channel", maxResults=1).execute()
     items = resp.get("items", [])
     if not items:
         return None
     return items[0]["snippet"]["channelId"]
+
+def channel_matches_language(video_titles: List[str], language: str) -> bool:
+    """
+    Enforce: selected-language-only channels
+    - Script languages: strict unicode check on recent titles (high accuracy)
+    - Latin languages: best-effort heuristics
+    """
+    titles_text = " ".join(video_titles or [])
+    pattern = LANG_UNICODE_RANGES.get(language)
+    if pattern:
+        return bool(re.search(pattern, titles_text))
+
+    t = titles_text.lower()
+
+    if language == "Spanish":
+        return (any(w in t for w in [" el ", " la ", " de ", " y ", " que ", " para ", " con "])
+                or any(c in t for c in "áéíóúñ"))
+
+    if language == "French":
+        return (any(w in t for w in [" le ", " la ", " de ", " et ", " pour ", " avec ", " que "])
+                or any(c in t for c in "àâçéèêëîïôùûüÿœ"))
+
+    if language == "English":
+        # accept if it doesn't strongly contain non-latin scripts
+        return not bool(re.search(
+            r"[\u0600-\u06FF\u0900-\u097F\u0980-\u09FF\u0A00-\u0A7F\u0A80-\u0AFF\u0B00-\u0B7F\u0B80-\u0BFF\u0C00-\u0CFF\u0D00-\u0D7F]",
+            titles_text
+        ))
+
+    return True
+
+def language_purity_percent(video_titles: List[str], language: str) -> int:
+    if not video_titles:
+        return 0
+    hits = sum(1 for t in video_titles if channel_matches_language([t], language))
+    return int(round((hits / len(video_titles)) * 100))
+
+def infer_channel_type(title: str, desc: str, recent_titles: List[str]) -> str:
+    text = " ".join([title or "", desc or ""] + (recent_titles or [])).lower()
+    taxonomy = [
+        ("Tech & Gadgets", ["tech","iphone","android","smartphone","mobile","laptop","review","unboxing","gadget"]),
+        ("Cooking & Food", ["recipe","cooking","kitchen","chef","baking","food","meal prep","dosa","biryani"]),
+        ("Beauty & Fashion", ["makeup","skincare","beauty","fashion","outfit","haul"]),
+        ("Fitness & Health", ["fitness","workout","gym","yoga","health","diet"]),
+        ("Education", ["tutorial","learn","course","lecture","explained","how to","tips"]),
+        ("Finance & Business", ["finance","stock","invest","trading","business","marketing","money"]),
+        ("Entertainment", ["comedy","movie","cinema","music","funny","prank"]),
+        ("Travel", ["travel","vlog","trip","tour","hotel"]),
+        ("Gaming", ["gaming","gameplay","walkthrough","ps5","xbox","minecraft","fortnite"]),
+        ("News & Politics", ["news","politics","breaking","debate"]),
+    ]
+    best, best_score = "General", 0
+    for label, kws in taxonomy:
+        score = sum(1 for k in kws if k in text)
+        if score > best_score:
+            best, best_score = label, score
+    return best
 
 # ==================================================
 # YouTube API setup
@@ -273,6 +268,9 @@ if not API_KEY:
 youtube = build("youtube", "v3", developerKey=API_KEY)
 
 def fetch_channel_analysis(channel_id: str):
+    """
+    Returns: channel stats + last 10 video titles + last 10 video view counts (aligned order)
+    """
     ch_resp = youtube.channels().list(part="snippet,statistics,contentDetails", id=channel_id).execute()
     items = ch_resp.get("items", [])
     if not items:
@@ -310,7 +308,8 @@ def fetch_channel_analysis(channel_id: str):
         return None
 
     vstats = youtube.videos().list(part="statistics", id=",".join(video_ids)).execute()
-    views_list = [safe_int(v.get("statistics", {}).get("viewCount", 0)) for v in vstats.get("items", [])]
+    views_map = {v["id"]: safe_int(v.get("statistics", {}).get("viewCount", 0)) for v in vstats.get("items", [])}
+    views_list = [views_map.get(vid, 0) for vid in video_ids]  # keep order aligned
 
     avg_views = int(sum(views_list) / max(len(views_list), 1))
     inactive_days = min(published_days) if published_days else 9999
@@ -329,11 +328,110 @@ def fetch_channel_analysis(channel_id: str):
         "inactive_days": inactive_days,
         "uploads_90d": uploads_90d,
         "video_titles": video_titles,
+        "views_list": views_list,
         "engagement_ratio": float(engagement_ratio),
         "engagement_label": engagement_label(float(engagement_ratio)),
         "channel_type": infer_channel_type(title, desc, video_titles),
         "url": f"https://www.youtube.com/channel/{channel_id}",
     }
+
+# ==================================================
+# Insights (9 total) - compute helpers
+# ==================================================
+SPONSOR_WORDS = ["sponsored", "ad", "paid partnership", "promo", "promotion", "brought to you by", "partnered with"]
+
+def fit_score(product: str, channel_title: str, channel_desc: str, video_titles: List[str]) -> int:
+    # Simple overlap-based fit score (0-100)
+    p_tokens = set(tokenize(product))
+    if not p_tokens:
+        return 0
+    c_tokens = set(tokenize(channel_title + " " + channel_desc + " " + " ".join(video_titles)))
+    overlap = len(p_tokens & c_tokens)
+    score = int(round(min(1.0, overlap / max(3, len(p_tokens))) * 100))
+    return score
+
+def sponsorship_readiness(eng_ratio: float, uploads_90d: int, inactive_days: int) -> str:
+    # heuristic readiness label
+    score = 0
+    if eng_ratio >= 0.05: score += 1
+    if eng_ratio >= 0.10: score += 1
+    if uploads_90d >= 6: score += 1
+    if uploads_90d >= 10: score += 1
+    if inactive_days <= 30: score += 1
+    if inactive_days <= 14: score += 1
+    if score >= 5: return "🟢 High"
+    if score >= 3: return "🟡 Medium"
+    return "🔴 Low"
+
+def growth_momentum(views_list: List[int]) -> str:
+    # compare last 3 vs previous 7 (if available)
+    if not views_list or len(views_list) < 6:
+        return "N/A"
+    last3 = views_list[:3]
+    prev = views_list[3:]
+    a = sum(last3) / max(1, len(last3))
+    b = sum(prev) / max(1, len(prev))
+    if b <= 0:
+        return "N/A"
+    pct = ((a - b) / b) * 100
+    sign = "+" if pct >= 0 else ""
+    return f"{sign}{pct:.0f}%"
+
+def sponsor_saturation(video_titles: List[str]) -> str:
+    t = " ".join(video_titles or []).lower()
+    count = sum(1 for w in SPONSOR_WORDS if w in t)
+    # count here is distinct words matched; ok as quick proxy
+    if count >= 3: return "🔴 High"
+    if count >= 1: return "🟡 Medium"
+    return "🟢 Low"
+
+def audience_trust_signal(eng_ratio: float, views_list: List[int]) -> str:
+    # proxy: higher engagement + lower volatility
+    if not views_list:
+        return "N/A"
+    mean = sum(views_list) / max(1, len(views_list))
+    if mean <= 0:
+        return "N/A"
+    var = sum((v - mean) ** 2 for v in views_list) / max(1, len(views_list))
+    std = var ** 0.5
+    cv = std / mean  # volatility
+    score = 0
+    if eng_ratio >= 0.05: score += 1
+    if eng_ratio >= 0.10: score += 1
+    if cv <= 1.2: score += 1
+    if cv <= 0.8: score += 1
+    if score >= 4: return "🟢 Strong"
+    if score >= 2: return "🟡 متوسط/Medium"
+    return "🔴 Weak"
+
+def product_compatibility(channel_type: str, product: str) -> str:
+    p = normalize_text(product)
+    # super-light mapping (edit anytime)
+    if channel_type == "Tech & Gadgets" and any(k in p for k in ["phone", "iphone", "android", "laptop", "gadget", "camera", "headphone"]):
+        return "🟢 Excellent"
+    if channel_type == "Cooking & Food" and any(k in p for k in ["kitchen", "cook", "cookware", "pan", "recipe", "spice", "mixer"]):
+        return "🟢 Excellent"
+    if channel_type == "Beauty & Fashion" and any(k in p for k in ["skincare", "makeup", "serum", "fashion", "outfit"]):
+        return "🟢 Excellent"
+    # ok match if any product tokens exist in titles will be captured by Fit Score anyway
+    return "🟡 Mixed"
+
+def risk_flags(eng_ratio: float, inactive_days: int, uploads_90d: int, views_list: List[int]) -> str:
+    flags = []
+    if inactive_days > 90:
+        flags.append("Inactive 90+ days")
+    if uploads_90d < 2:
+        flags.append("Low posting")
+    if eng_ratio < 0.02:
+        flags.append("Low engagement")
+    if views_list:
+        mean = sum(views_list) / max(1, len(views_list))
+        if mean > 0:
+            var = sum((v - mean) ** 2 for v in views_list) / max(1, len(views_list))
+            cv = (var ** 0.5) / mean
+            if cv > 1.5:
+                flags.append("High volatility")
+    return "✅ None" if not flags else "⚠️ " + "; ".join(flags)
 
 # ==================================================
 # Session state
@@ -347,13 +445,13 @@ if "mode" not in st.session_state:
 st.markdown('<div class="content-box">', unsafe_allow_html=True)
 st.title("📺 YouTube Marketing Investment Intelligence Platform")
 st.write("Choose a mode below to continue.")
-st.markdown("<div class='small-note'>⚠️ Hosted on Render free tier. Cold start may take 30–60 seconds.</div>", unsafe_allow_html=True)
+st.markdown("<div class='small-note'>⚠️ Render free tier may take 30–60 seconds on first load.</div>", unsafe_allow_html=True)
 st.markdown("</div>", unsafe_allow_html=True)
 
 status_area = st.empty()
 
 # ==================================================
-# Back to Home (top-left, NOT on landing)
+# Back to Home (top-left) - only when not on landing
 # ==================================================
 if st.session_state.get("mode") is not None:
     col_btn, _ = st.columns([2, 10])
@@ -363,7 +461,7 @@ if st.session_state.get("mode") is not None:
             st.rerun()
 
 # ==================================================
-# Landing page
+# Landing
 # ==================================================
 if st.session_state["mode"] is None:
     st.markdown('<div class="content-box">', unsafe_allow_html=True)
@@ -380,9 +478,10 @@ if st.session_state["mode"] is None:
     st.stop()
 
 # ==================================================
-# Discover Channels
-# Inputs: country, language, product, minimum subscribers
-# Enforce: selected language channels only
+# DISCOVER CHANNELS
+# - country, language, product, min subs
+# - enforce selected-language channels only
+# - add Tier 1/2/3 insights UI and compute columns
 # ==================================================
 if st.session_state["mode"] == "discover":
     st.markdown('<div class="content-box">', unsafe_allow_html=True)
@@ -397,8 +496,49 @@ if st.session_state["mode"] == "discover":
     product = st.text_input("Marketing Product", placeholder="Ex: phone, kitchen gadgets, skincare")
     min_subs = st.number_input("Minimum Subscribers", min_value=0, value=100000, step=10000)
 
-    run = st.button("🚀 Find Channels", type="primary")
     st.markdown("</div>", unsafe_allow_html=True)
+
+    # -------- Insights UI --------
+    st.markdown('<div class="content-box">', unsafe_allow_html=True)
+    st.subheader("✨ Insights (Tier-1 / Tier-2 / Tier-3)")
+
+    TIER_1 = [
+        ("fit_score", "Brand–Audience Fit Score"),
+        ("sponsor_ready", "Sponsorship Readiness"),
+        ("cost_efficiency", "Cost-Efficiency Index (ROI proxy)"),
+    ]
+    TIER_2 = [
+        ("growth_momentum", "Growth Momentum"),
+        ("sponsor_saturation", "Sponsorship Saturation Risk"),
+        ("audience_trust", "Audience Trust Signal"),
+    ]
+    TIER_3 = [
+        ("language_purity", "Language Purity Score"),
+        ("product_compat", "Product Placement Compatibility"),
+        ("risk_flags", "Risk Flags"),
+    ]
+
+    colA, colB, colC = st.columns(3)
+
+    with colA:
+        st.markdown("### Tier-1 (Must-have)")
+        for key, label in TIER_1:
+            st.checkbox(label, key=f"ins_{key}", value=True)
+
+    with colB:
+        st.markdown("### Tier-2 (Differentiators)")
+        for key, label in TIER_2:
+            st.checkbox(label, key=f"ins_{key}", value=True)
+
+    with colC:
+        st.markdown("### Tier-3 (Advanced)")
+        for key, label in TIER_3:
+            st.checkbox(label, key=f"ins_{key}", value=False)
+
+    enabled_insights = {k: st.session_state.get(f"ins_{k}", False) for k, _ in (TIER_1 + TIER_2 + TIER_3)}
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    run = st.button("🚀 Find Channels", type="primary")
 
     if run:
         if not product.strip():
@@ -408,16 +548,11 @@ if st.session_state["mode"] == "discover":
         region_code = COUNTRY_REGION_CODE.get(country, "US")
         relevance_lang = LANG_TO_YT_CODE.get(language, "en")
         lang_hint = LANG_QUERY_HINTS.get(language, "")
-
         query = f"{product.strip()} {lang_hint}".strip()
 
-        status_area.markdown(
-            "<div class='status-box'>🔎 <b>Checking with YouTube...</b> Results are on the way ✅</div>",
-            unsafe_allow_html=True
-        )
-
+        status_area.markdown("<div class='status-box'>🔎 <b>Checking with YouTube...</b> Results are on the way ✅</div>", unsafe_allow_html=True)
         progress = st.progress(0)
-        progress.progress(25)
+        progress.progress(20)
         time.sleep(0.08)
 
         try:
@@ -430,7 +565,7 @@ if st.session_state["mode"] == "discover":
                 relevanceLanguage=relevance_lang
             ).execute()
 
-            progress.progress(60)
+            progress.progress(55)
 
             channel_ids = [item["snippet"]["channelId"] for item in search_response.get("items", [])]
             if not channel_ids:
@@ -445,15 +580,15 @@ if st.session_state["mode"] == "discover":
                 if not a:
                     continue
 
-                # Minimum subscribers filter
+                # min subscribers
                 if a["subs"] < min_subs:
                     continue
 
-                # ✅ Enforce selected-language-only channels
+                # enforce selected language channels only
                 if not channel_matches_language(a["video_titles"], language):
                     continue
 
-                rows.append({
+                row = {
                     "Channel": a["title"],
                     "Type": a["channel_type"],
                     "Subscribers": a["subs"],
@@ -461,32 +596,91 @@ if st.session_state["mode"] == "discover":
                     "Engagement": f"{a['engagement_label']} ({a['engagement_ratio']:.3f})",
                     "Total Views": a["total_views"],
                     "Channel URL": a["url"],
-                })
+                }
+
+                # -------- Tier 1 --------
+                if enabled_insights["fit_score"]:
+                    row["Fit Score"] = fit_score(product, a["title"], a["desc"], a["video_titles"])
+                if enabled_insights["sponsor_ready"]:
+                    row["Sponsorship Readiness"] = sponsorship_readiness(a["engagement_ratio"], a["uploads_90d"], a["inactive_days"])
+                if enabled_insights["cost_efficiency"]:
+                    # temporary numeric, will normalize after df created
+                    row["_eff_raw"] = a["avg_views"] / max(1.0, (a["subs"] / 1000.0))  # views per 1k subs
+
+                # -------- Tier 2 --------
+                if enabled_insights["growth_momentum"]:
+                    row["Growth Momentum"] = growth_momentum(a["views_list"])
+                if enabled_insights["sponsor_saturation"]:
+                    row["Sponsor Saturation"] = sponsor_saturation(a["video_titles"])
+                if enabled_insights["audience_trust"]:
+                    row["Audience Trust"] = audience_trust_signal(a["engagement_ratio"], a["views_list"])
+
+                # -------- Tier 3 --------
+                if enabled_insights["language_purity"]:
+                    row["Language Purity"] = f"{language_purity_percent(a['video_titles'], language)}%"
+                if enabled_insights["product_compat"]:
+                    row["Product Compatibility"] = product_compatibility(a["channel_type"], product)
+                if enabled_insights["risk_flags"]:
+                    row["Risk Flags"] = risk_flags(a["engagement_ratio"], a["inactive_days"], a["uploads_90d"], a["views_list"])
+
+                rows.append(row)
 
             if not rows:
                 progress.empty()
                 status_area.empty()
-                st.warning("No channels matched your filters + selected language. Try lowering subscribers or changing product keyword.")
+                st.warning("No channels matched your filters + selected language. Try lowering subscribers or changing the product keyword.")
                 st.stop()
 
-            df = pd.DataFrame(rows).sort_values("Subscribers", ascending=False).head(20)
+            df = pd.DataFrame(rows)
+
+            # Normalize cost-efficiency into “x” vs median
+            if enabled_insights["cost_efficiency"] and "_eff_raw" in df.columns:
+                med = df["_eff_raw"].median() if df["_eff_raw"].notna().any() else 0
+                if med and med > 0:
+                    df["Cost Efficiency"] = (df["_eff_raw"] / med).map(lambda x: f"{x:.1f}x")
+                else:
+                    df["Cost Efficiency"] = "N/A"
+                df.drop(columns=["_eff_raw"], inplace=True, errors="ignore")
+
+            # Sort: top by Subscribers then Fit Score if exists
+            sort_cols = ["Subscribers"]
+            ascending = [False]
+            if "Fit Score" in df.columns:
+                sort_cols.append("Fit Score")
+                ascending.append(False)
+            df = df.sort_values(sort_cols, ascending=ascending).head(20)
 
             progress.progress(100)
             time.sleep(0.06)
             progress.empty()
-
             status_area.markdown("<div class='status-box'>✅ <b>Results are ready!</b></div>", unsafe_allow_html=True)
+
+            # Show only selected insight columns
+            base_cols = ["Channel", "Type", "Subscribers", "Avg Views (Last 10)", "Engagement", "Total Views", "Channel URL"]
+            optional_cols = []
+            if enabled_insights["fit_score"]: optional_cols.append("Fit Score")
+            if enabled_insights["sponsor_ready"]: optional_cols.append("Sponsorship Readiness")
+            if enabled_insights["cost_efficiency"]: optional_cols.append("Cost Efficiency")
+            if enabled_insights["growth_momentum"]: optional_cols.append("Growth Momentum")
+            if enabled_insights["sponsor_saturation"]: optional_cols.append("Sponsor Saturation")
+            if enabled_insights["audience_trust"]: optional_cols.append("Audience Trust")
+            if enabled_insights["language_purity"]: optional_cols.append("Language Purity")
+            if enabled_insights["product_compat"]: optional_cols.append("Product Compatibility")
+            if enabled_insights["risk_flags"]: optional_cols.append("Risk Flags")
+
+            display_cols = [c for c in base_cols + optional_cols if c in df.columns]
 
             st.markdown('<div class="content-box">', unsafe_allow_html=True)
             st.subheader("✅ Results")
             st.write(f"**Country:** {country} | **Language:** {language}")
             st.write(f"**Product:** {product} | **Min Subscribers:** {min_subs:,}")
-            st.dataframe(df, use_container_width=True, hide_index=True)
+            st.dataframe(df[display_cols], use_container_width=True, hide_index=True)
+
             st.download_button(
                 "⬇️ Download CSV",
-                data=df.to_csv(index=False).encode("utf-8"),
+                data=df[display_cols].to_csv(index=False).encode("utf-8"),
                 file_name="discover_channels.csv",
-                mime="text/csv"
+                mime="text/csv",
             )
             st.markdown("</div>", unsafe_allow_html=True)
 
@@ -496,27 +690,23 @@ if st.session_state["mode"] == "discover":
             st.error(f"YouTube API error: {e}")
 
 # ==================================================
-# Evaluate a Channel
-# Input: channel name/url only
-# Output: engagement score + channel type + stats + last 10 titles
+# EVALUATE A CHANNEL
+# - channel name/url only
+# - show engagement score + channel type + stats + last 10 titles
 # ==================================================
 if st.session_state["mode"] == "evaluate":
     st.markdown('<div class="content-box">', unsafe_allow_html=True)
     st.subheader("✅ Evaluate a Channel")
     channel_input = st.text_input("Channel Name or URL", placeholder="Ex: Marques Brownlee or https://www.youtube.com/@mkbhd")
-    run = st.button("✅ Evaluate Channel", type="primary")
+    run_eval = st.button("✅ Evaluate Channel", type="primary")
     st.markdown("</div>", unsafe_allow_html=True)
 
-    if run:
+    if run_eval:
         if not channel_input.strip():
             st.warning("Please enter a channel name or URL.")
             st.stop()
 
-        status_area.markdown(
-            "<div class='status-box'>🔎 <b>Checking this channel with YouTube...</b> Results are on the way ✅</div>",
-            unsafe_allow_html=True
-        )
-
+        status_area.markdown("<div class='status-box'>🔎 <b>Checking this channel with YouTube...</b> Results are on the way ✅</div>", unsafe_allow_html=True)
         progress = st.progress(0)
         progress.progress(30)
         time.sleep(0.08)
@@ -539,7 +729,6 @@ if st.session_state["mode"] == "evaluate":
             progress.progress(100)
             time.sleep(0.06)
             progress.empty()
-
             status_area.markdown("<div class='status-box'>✅ <b>Channel evaluation completed.</b></div>", unsafe_allow_html=True)
 
             st.markdown('<div class="content-box">', unsafe_allow_html=True)
