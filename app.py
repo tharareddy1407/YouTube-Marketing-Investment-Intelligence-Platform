@@ -21,21 +21,7 @@ st.set_page_config(
 # =========================
 # CSS: remove blocks + style cards
 # =========================
-st.markdown("""
 
-.status-box{
-  background: rgba(255,255,255,0.94);
-  border: 1px solid rgba(15,23,42,0.12);
-  padding: 0.95rem 1.1rem;
-  border-radius: 14px;
-  margin: 0.8rem 0 1.2rem 0;
-}
-.small-note{font-size:0.92rem;color:#334155;}
-h1,h2,h3{color:#0f172a;font-weight:900;}
-p,span,div,label{color:#1f2937;font-size:1rem;}
-.stButton>button{border-radius:14px!important;padding:0.8rem 1rem!important;font-weight:750!important;}
-</style>
-""", unsafe_allow_html=True)
 
 # =========================
 # Background image
