@@ -5,7 +5,7 @@ import base64
 from pathlib import Path
 from datetime import datetime, timezone
 import urllib.parse as urlparse
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple
 
 import streamlit as st
 import pandas as pd
@@ -49,7 +49,7 @@ def set_local_background(image_path: str):
 set_local_background("assets/background.png")
 
 # ==================================================
-# Country -> languages + YouTube region code
+# Country -> Languages + Region code
 # ==================================================
 COUNTRY_LANGUAGE_MAP: Dict[str, List[str]] = {
     "USA": ["English", "Spanish"],
@@ -70,10 +70,10 @@ LANG_TO_YT_CODE = {
     "Arabic": "ar", "Mandarin": "zh", "Malay": "ms",
 }
 
-# Strict unicode ranges for language filtering (high accuracy for script languages)
+# Unicode script ranges (for strict language filtering in Discover mode)
 LANG_UNICODE_RANGES = {
-    "Hindi": r"[\u0900-\u097F]",
-    "Marathi": r"[\u0900-\u097F]",
+    "Hindi": r"[\u0900-\u097F]",        # Devanagari
+    "Marathi": r"[\u0900-\u097F]",      # Devanagari
     "Telugu": r"[\u0C00-\u0C7F]",
     "Tamil": r"[\u0B80-\u0BFF]",
     "Kannada": r"[\u0C80-\u0CFF]",
@@ -86,7 +86,6 @@ LANG_UNICODE_RANGES = {
     "Arabic": r"[\u0600-\u06FF]",
 }
 
-# Search query hints (helps YouTube return better matching channels)
 LANG_QUERY_HINTS = {
     "Spanish": " español en español",
     "French": " français en français",
@@ -104,6 +103,108 @@ LANG_QUERY_HINTS = {
     "Arabic": " العربية Arabic",
     "Mandarin": " 中文 Mandarin",
     "Malay": " Bahasa Melayu Malay",
+}
+
+# ==================================================
+# Expanded Channel Type Keywords (for product typing + optional improvements)
+# ==================================================
+TYPE_KEYWORDS = {
+    "Tech & Gadgets": [
+        "tech","technology","gadgets","gadget","electronics","electronic","device","devices",
+        "review","unboxing","comparison","vs","hands on","hands-on","first look","benchmarks",
+        "smartphone","phone","mobile","iphone","android","samsung","pixel","oneplus","xiaomi","realme",
+        "laptop","macbook","windows","chromebook","tablet","ipad","surface",
+        "smartwatch","smart watch","watch","wearable","fitness band","band","tracker",
+        "earbuds","earphones","headphones","tws","bluetooth","wireless",
+        "camera","dslr","mirrorless","lens","gimbal","microphone","mic",
+        "charger","adapter","power bank","cable","usb","type c","type-c","usb-c",
+        "router","wifi","wi-fi","network","internet","isp",
+        "pc build","gpu","cpu","ram","ssd","hard disk","motherboard",
+        "ai","artificial intelligence","apps","software","update","ios","android update",
+    ],
+    "Cooking & Food": [
+        "food","cooking","cook","recipe","recipes","kitchen","chef","home chef",
+        "cake","cakes","baking","bake","bakery","dessert","desserts","sweet","sweets",
+        "bread","cookies","brownie","cupcake","pastry","ice cream","chocolate",
+        "breakfast","lunch","dinner","meal","meal prep","meal-prep",
+        "snack","snacks","street food","fast food","restaurant","hotel","cafe","buffet",
+        "biryani","dosa","idli","vada","sambar","chutney","curry","dal","roti","paratha",
+        "veg","vegetarian","non veg","non-veg","vegan","grill","tandoor","bbq","fry",
+        "spices","masala","pickle","pickles","sauce","ketchup","mayonnaise",
+        "cookware","pan","pot","pressure cooker","air fryer","mixer","grinder","oven",
+    ],
+    "Beauty & Fashion": [
+        "beauty","makeup","skincare","skin care","cosmetics","fashion","style","styling",
+        "outfit","outfits","haul","try on","try-on","lookbook","ootd",
+        "dress","saree","lehenga","kurta","jeans","shoes","heels","sneakers",
+        "accessories","jewelry","jewellery",
+        "lipstick","foundation","concealer","eyeliner","mascara","blush","highlighter",
+        "hair","haircare","hair care","hairstyle","salon","grooming",
+        "perfume","fragrance","deodorant",
+    ],
+    "Fitness & Health": [
+        "fitness","workout","gym","exercise","training","yoga","pilates","cardio",
+        "diet","nutrition","healthy","health","wellness","weight loss","fat loss",
+        "muscle","strength","bodybuilding","protein","supplement","vitamins",
+        "meditation","mental health","mindfulness","stretch","mobility",
+    ],
+    "Education & Tutorials": [
+        "education","tutorial","how to","how-to","learn","course","lesson","classes","training",
+        "explained","guide","tips","tricks","basics","beginner","advanced",
+        "study","exam","school","college","university",
+        "coding","programming","python","java","sql","excel","power bi","tableau",
+        "data","analytics","machine learning","ml","ai tutorial",
+    ],
+    "Finance & Business": [
+        "finance","business","money","investment","investing","stocks","share market","trading",
+        "crypto","bitcoin","mutual fund","bank","loan","credit","tax","budget",
+        "startup","entrepreneur","marketing","digital marketing","ads","seo",
+        "profit","revenue","income","side hustle","passive income",
+    ],
+    "Entertainment": [
+        "entertainment","comedy","funny","skit","prank","reaction","roast",
+        "movie","cinema","film","trailer","music","song","dance",
+        "celebrity","interview","show","standup","stand-up",
+    ],
+    "Gaming": [
+        "gaming","gameplay","walkthrough","live","stream","streaming",
+        "ps5","playstation","xbox","pc gaming","mobile gaming",
+        "pubg","bgmi","free fire","fortnite","minecraft","valorant","gta","cod","call of duty",
+        "esports","e-sports",
+    ],
+    "Travel & Lifestyle": [
+        "travel","trip","tour","vlog","journey","vacation","holiday",
+        "hotel","resort","flight","airport","visa",
+        "road trip","roadtrip","budget travel","luxury travel",
+        "lifestyle","daily vlog","routine","day in my life","minimalism",
+    ],
+    "News & Politics": [
+        "news","politics","current affairs","breaking","debate","analysis",
+        "election","government","policy","law","parliament","court",
+    ],
+    "Kids & Family": [
+        "kids","children","baby","cartoon","nursery","rhymes","toy","toys",
+        "abc","alphabets","numbers","family","parenting",
+    ],
+    "Auto & Vehicles": [
+        "car","cars","bike","bikes","automobile","vehicle","engine",
+        "review","test drive","mileage","ev","electric vehicle",
+        "modification","accessories","tyres","tires",
+    ],
+    "Sports": [
+        "sports","cricket","football","soccer","tennis","badminton","kabaddi",
+        "match","highlights","analysis","score","ipl","world cup",
+    ],
+    "Science & Knowledge": [
+        "science","space","nasa","isro","physics","chemistry","biology",
+        "facts","research","experiment","innovation","future","ai","technology explained",
+    ],
+}
+
+# product synonym boost (helps “watch” map to tech, “cake” to food)
+PRODUCT_SYNONYMS = {
+    "watch": ["watch", "smartwatch", "smart watch", "wearable", "fitness band", "band", "tracker"],
+    "cake": ["cake", "cakes", "cupcake", "cupcakes", "pastry", "dessert", "baking"],
 }
 
 # ==================================================
@@ -141,28 +242,23 @@ def channel_matches_language(video_titles: List[str], language: str) -> bool:
     titles_text = " ".join(video_titles or [])
     pattern = LANG_UNICODE_RANGES.get(language)
 
-    # Strict script match if we have a unicode range for this language
+    # Strict script match where possible
     if pattern:
         return bool(re.search(pattern, titles_text))
 
     # Latin-script languages: best-effort heuristics
     t = f" {titles_text.lower()} "
-
     if language == "Spanish":
         return (any(w in t for w in [" el ", " la ", " de ", " y ", " que ", " para ", " con "])
                 or any(c in t for c in "áéíóúñ"))
-
     if language == "French":
         return (any(w in t for w in [" le ", " la ", " de ", " et ", " pour ", " avec ", " que "])
                 or any(c in t for c in "àâçéèêëîïôùûüÿœ"))
-
     if language == "English":
-        # accept if titles don't strongly contain other scripts
         return not bool(re.search(
             r"[\u0600-\u06FF\u0900-\u097F\u0980-\u09FF\u0A00-\u0A7F\u0A80-\u0AFF\u0B00-\u0B7F\u0B80-\u0BFF\u0C00-\u0CFF\u0D00-\u0D7F]",
             titles_text
         ))
-
     return True
 
 def language_purity_percent(video_titles: List[str], language: str) -> int:
@@ -172,18 +268,26 @@ def language_purity_percent(video_titles: List[str], language: str) -> int:
     return int(round((hits / len(video_titles)) * 100))
 
 def infer_channel_type(title: str, desc: str, recent_titles: List[str]) -> str:
+    """
+    Your existing heuristic classifier.
+    (You can later replace with TYPE_KEYWORDS-weighted scoring if you want.)
+    """
     text = " ".join([title or "", desc or ""] + (recent_titles or [])).lower()
     taxonomy = [
-        ("Tech & Gadgets", ["tech","iphone","android","smartphone","mobile","laptop","review","unboxing","gadget"]),
-        ("Cooking & Food", ["recipe","cooking","kitchen","chef","baking","food","meal prep","dosa","biryani"]),
+        ("Tech & Gadgets", ["tech","iphone","android","smartphone","mobile","laptop","review","unboxing","gadget","watch","smartwatch"]),
+        ("Cooking & Food", ["recipe","cooking","kitchen","chef","baking","food","meal prep","dosa","biryani","cake"]),
         ("Beauty & Fashion", ["makeup","skincare","beauty","fashion","outfit","haul"]),
         ("Fitness & Health", ["fitness","workout","gym","yoga","health","diet"]),
-        ("Education", ["tutorial","learn","course","lecture","explained","how to","tips"]),
+        ("Education & Tutorials", ["tutorial","learn","course","lecture","explained","how to","tips"]),
         ("Finance & Business", ["finance","stock","invest","trading","business","marketing","money"]),
-        ("Entertainment", ["comedy","movie","cinema","music","funny","prank"]),
-        ("Travel", ["travel","vlog","trip","tour","hotel"]),
-        ("Gaming", ["gaming","gameplay","walkthrough","ps5","xbox","minecraft","fortnite"]),
+        ("Entertainment", ["comedy","movie","cinema","music","funny","prank","reaction"]),
+        ("Travel & Lifestyle", ["travel","vlog","trip","tour","hotel","lifestyle","routine"]),
+        ("Gaming", ["gaming","gameplay","walkthrough","ps5","xbox","minecraft","fortnite","bgmi"]),
         ("News & Politics", ["news","politics","breaking","debate"]),
+        ("Auto & Vehicles", ["car","bike","ev","test drive","automobile"]),
+        ("Sports", ["cricket","football","ipl","match","highlights"]),
+        ("Kids & Family", ["kids","rhymes","cartoon","toys"]),
+        ("Science & Knowledge", ["science","space","nasa","isro","physics","facts"]),
     ]
     best, best_score = "General", 0
     for label, kws in taxonomy:
@@ -227,12 +331,73 @@ def resolve_channel_id(youtube_client, channel_input: str):
     return items[0]["snippet"]["channelId"]
 
 # ==================================================
-# Evaluate-mode: language purity without asking user
-# (dominant script bucket based on recent titles)
+# Product typing + verdict (watch->tech, cake->food, etc.)
+# ==================================================
+def detect_type_from_text(text: str) -> str:
+    """
+    Detect best matching type based on keyword hits.
+    Returns one of TYPE_KEYWORDS keys or 'General'.
+    """
+    t = (text or "").lower().strip()
+    if not t:
+        return "General"
+
+    # synonym boost
+    for base, syns in PRODUCT_SYNONYMS.items():
+        if any(s in t for s in syns):
+            t += f" {base}"
+
+    best_type = "General"
+    best_score = 0
+    for type_name, kws in TYPE_KEYWORDS.items():
+        score = 0
+        for kw in kws:
+            if kw in t:
+                score += 1
+        if score > best_score:
+            best_score = score
+            best_type = type_name
+
+    return best_type if best_score > 0 else "General"
+
+def investment_verdict_simple(channel_type: str, product_text: str, fit_score: int, engagement_ratio: float) -> Tuple[str, str]:
+    """
+    Returns (verdict_label, reason)
+    verdict_label: '🟢 Recommended' | '🟡 Maybe' | '🔴 Not Recommended'
+    """
+    product_type = detect_type_from_text(product_text)
+    p = (product_text or "").lower()
+
+    # Category match => never harsh reject just because fit overlap is low
+    if product_type != "General" and channel_type == product_type:
+        if fit_score >= 55 or engagement_ratio >= 0.05:
+            return "🟢 Recommended", f"Product type **{product_type}** matches channel type **{channel_type}**."
+        return "🟡 Maybe", "Type matches, but keyword Fit Score is low. Try a small pilot campaign."
+
+    # If product type is unclear
+    if product_type == "General":
+        if fit_score >= 60:
+            return "🟡 Maybe", "Product type is unclear, but Fit Score is decent. Use a more specific keyword to improve accuracy."
+        return "🔴 Not Recommended", "Product keyword is too generic and Fit Score is low. Use a more specific product name."
+
+    # Explicit mismatch examples (cake on tech => reject, but kitchen gadgets on tech => maybe)
+    if channel_type == "Tech & Gadgets" and product_type == "Cooking & Food":
+        kitchen_gadget_terms = ["air fryer","mixer","grinder","oven","cookware","pan","pot","kitchen gadget","kitchen","blender"]
+        if any(k in p for k in kitchen_gadget_terms):
+            return "🟡 Maybe", "Tech channels can work for **kitchen gadgets** (review/unboxing angle). Consider a test sponsorship."
+        return "🔴 Not Recommended", "Food items like **cake** usually don’t convert well on tech-focused audiences."
+
+    # Default mismatch
+    if fit_score >= 70 and engagement_ratio >= 0.05:
+        return "🟡 Maybe", f"Different categories (**{product_type}** vs **{channel_type}**) but strong Fit Score + engagement suggests it may still work."
+    return "🔴 Not Recommended", f"Mismatch: product type **{product_type}** vs channel type **{channel_type}**."
+
+# ==================================================
+# Evaluate-mode language purity (auto-detect dominant script)
 # ==================================================
 SCRIPT_BUCKETS: List[Tuple[str, str]] = [
     ("Telugu", r"[\u0C00-\u0C7F]"),
-    ("Devanagari", r"[\u0900-\u097F]"),   # Hindi/Marathi
+    ("Devanagari", r"[\u0900-\u097F]"),
     ("Tamil", r"[\u0B80-\u0BFF]"),
     ("Kannada", r"[\u0C80-\u0CFF]"),
     ("Malayalam", r"[\u0D00-\u0D7F]"),
@@ -270,60 +435,7 @@ def detect_dominant_script_purity(video_titles: List[str]) -> str:
     return f"{purity}% ({best_name})"
 
 # ==================================================
-# Product category detection + investment verdict
-# ==================================================
-PRODUCT_CATEGORY_RULES: List[Tuple[str, List[str]]] = [
-    ("Cooking & Food", ["food", "snack", "snacks", "restaurant", "cafe", "recipe", "biryani", "dosa", "masala", "spice", "chutney", "meal", "cooking", "kitchen"]),
-    ("Tech & Gadgets", ["phone", "iphone", "android", "laptop", "tablet", "camera", "earbuds", "headphones", "smartwatch", "gadget", "electronics"]),
-    ("Beauty & Fashion", ["makeup", "skincare", "serum", "lipstick", "foundation", "beauty", "fashion", "outfit", "clothes"]),
-    ("Fitness & Health", ["fitness", "gym", "protein", "workout", "yoga", "health", "supplement"]),
-    ("Finance & Business", ["finance", "stock", "invest", "trading", "insurance", "loan", "credit", "business"]),
-    ("Gaming", ["game", "gaming", "ps5", "xbox", "pc gaming", "fortnite", "minecraft"]),
-    ("Travel", ["travel", "hotel", "flight", "trip", "tour"]),
-    ("Education", ["course", "tutorial", "learn", "class", "training", "bootcamp"]),
-]
-
-def detect_product_category(product: str) -> str:
-    p = normalize_text(product)
-    for cat, kws in PRODUCT_CATEGORY_RULES:
-        if any(k in p for k in kws):
-            return cat
-    return "General"
-
-def investment_verdict(channel_type: str, product: str, fit: int, engagement_ratio: float) -> Tuple[str, str, str]:
-    """
-    Returns: (badge, headline, reason)
-    badge: 🟢/🟡/🔴
-    headline: "Recommended" / "Maybe" / "Not Recommended"
-    reason: explanation
-    """
-    prod_cat = detect_product_category(product)
-
-    # Strong match by category
-    same_category = (prod_cat != "General" and channel_type == prod_cat)
-
-    # Mismatch cases that are usually poor
-    strong_mismatch_pairs = {
-        ("Tech & Gadgets", "Cooking & Food"),
-        ("Cooking & Food", "Tech & Gadgets"),
-        ("Gaming", "Cooking & Food"),
-        ("News & Politics", "Cooking & Food"),
-    }
-    mismatch = (channel_type, prod_cat) in strong_mismatch_pairs
-
-    # Rules
-    if mismatch and fit < 55:
-        return ("🔴", "Not Recommended", f"Channel type is **{channel_type}** but your product looks like **{prod_cat}**. Audience mismatch → low conversions likely.")
-    if same_category and fit >= 60:
-        return ("🟢", "Recommended", f"Strong match: channel type **{channel_type}** aligns with your product category **{prod_cat}** and Fit Score is high.")
-    if fit >= 70 and engagement_ratio >= 0.05:
-        return ("🟢", "Recommended", "High Fit Score + healthy engagement. This is a strong channel to test ads/sponsorships.")
-    if fit >= 45:
-        return ("🟡", "Maybe", f"Partial match. Consider a creative angle or a short pilot campaign. Product category detected: **{prod_cat}**.")
-    return ("🔴", "Not Recommended", f"Low Fit Score. Try channels closer to your product category: **{prod_cat}** (or refine keywords).")
-
-# ==================================================
-# YouTube API setup
+# YouTube API
 # ==================================================
 API_KEY = os.getenv("YOUTUBE_API_KEY", "").strip()
 if not API_KEY:
@@ -334,12 +446,8 @@ youtube = build("youtube", "v3", developerKey=API_KEY)
 
 def fetch_channel_analysis(channel_id: str):
     """
-    Returns:
-      - channel stats
-      - last 10 video titles
-      - aligned view/like/comment counts for those last 10 videos
-    Notes:
-      - Like/Comment counts can be missing (creator hides them) -> becomes 0.
+    Returns channel stats + last 10 titles + aligned view/like/comment counts.
+    Like/comment counts may be missing -> 0.
     """
     ch_resp = youtube.channels().list(part="snippet,statistics,contentDetails", id=channel_id).execute()
     items = ch_resp.get("items", [])
@@ -355,6 +463,7 @@ def fetch_channel_analysis(channel_id: str):
     desc = snippet.get("description", "")
     subs = safe_int(stats.get("subscriberCount", 0))
     total_views = safe_int(stats.get("viewCount", 0))
+    video_count = safe_int(stats.get("videoCount", 0))
 
     uploads_id = cd.get("relatedPlaylists", {}).get("uploads")
     if not uploads_id:
@@ -405,6 +514,7 @@ def fetch_channel_analysis(channel_id: str):
         "desc": desc,
         "subs": subs,
         "total_views": total_views,
+        "video_count": video_count,
         "avg_views": avg_views,
         "avg_likes": avg_likes,
         "avg_comments": avg_comments,
@@ -419,11 +529,12 @@ def fetch_channel_analysis(channel_id: str):
     }
 
 # ==================================================
-# Remaining insight calculations
+# Insights (Tier 1/2/3)
 # ==================================================
 SPONSOR_WORDS = ["sponsored", "ad", "paid partnership", "promo", "promotion", "brought to you by", "partnered with"]
 
 def calc_fit_score(product: str, title: str, desc: str, video_titles: List[str]) -> int:
+    # overlap-based fit score 0-100
     p_tokens = set(tokenize(product))
     if not p_tokens:
         return 0
@@ -444,6 +555,7 @@ def calc_sponsorship_readiness(eng_ratio: float, uploads_90d: int, inactive_days
     return "🔴 Low"
 
 def calc_growth_momentum(views_list: List[int]) -> str:
+    # compare last3 vs previous videos
     if not views_list or len(views_list) < 6:
         return "N/A"
     last3 = views_list[:3]
@@ -464,6 +576,7 @@ def calc_sponsor_saturation(video_titles: List[str]) -> str:
     return "🟢 Low"
 
 def calc_audience_trust(eng_ratio: float, views_list: List[int]) -> str:
+    # proxy: engagement + view stability (lower volatility better)
     if not views_list:
         return "N/A"
     mean = sum(views_list) / max(1, len(views_list))
@@ -482,13 +595,19 @@ def calc_audience_trust(eng_ratio: float, views_list: List[int]) -> str:
     return "🔴 Weak"
 
 def calc_product_compat(channel_type: str, product: str) -> str:
-    p = normalize_text(product)
-    if channel_type == "Tech & Gadgets" and any(k in p for k in ["phone","iphone","android","laptop","gadget","camera","headphone"]):
+    # simple compatibility: use detected product type vs channel type
+    product_type = detect_type_from_text(product)
+    if product_type != "General" and product_type == channel_type:
         return "🟢 Excellent"
-    if channel_type == "Cooking & Food" and any(k in p for k in ["kitchen","cook","cookware","pan","recipe","spice","mixer","food","snack","restaurant"]):
-        return "🟢 Excellent"
-    if channel_type == "Beauty & Fashion" and any(k in p for k in ["skincare","makeup","serum","fashion","outfit"]):
-        return "🟢 Excellent"
+    if channel_type == "Tech & Gadgets" and product_type == "Cooking & Food":
+        # allow kitchen gadgets
+        p = (product or "").lower()
+        kitchen_gadget_terms = ["air fryer","mixer","grinder","oven","cookware","pan","pot","kitchen gadget","kitchen","blender"]
+        if any(k in p for k in kitchen_gadget_terms):
+            return "🟡 Mixed"
+        return "🔴 Poor"
+    if product_type == "General":
+        return "🟡 Mixed"
     return "🟡 Mixed"
 
 def calc_risk_flags(eng_ratio: float, inactive_days: int, uploads_90d: int, views_list: List[int]) -> str:
@@ -511,46 +630,46 @@ def calc_risk_flags(eng_ratio: float, inactive_days: int, uploads_90d: int, view
 def render_glossary():
     with st.expander("ℹ️ Metrics Glossary (What each insight means)"):
         st.markdown("""
-**Base**
+**Table 1 — Base**
 - **Channel**: YouTube channel name.
-- **Type**: Estimated category based on recent content (e.g., Tech, Cooking).
+- **Type**: Estimated category based on recent content.
 - **Subscribers**: Total channel subscribers.
 - **Avg Views**: Average views on the last 10 uploads.
 - **Avg Likes / Avg Comments**: Average likes/comments on the last 10 uploads (**may be 0 if creator hides them**).
 - **Engagement**: Avg Views ÷ Subscribers (proxy for audience activity).
 - **Channel URL**: Direct link to the channel.
 
-**Tier 1**
-- **Fit Score**: 0–100 match between your product keywords and the channel’s recent content (titles/description).
+**Table 2 — Tier 1**
+- **Fit Score**: 0–100 keyword match between product and channel content (titles/description).
 - **Sponsorship Readiness**: High/Medium/Low based on engagement + posting frequency + recency.
 - **Cost Efficiency**: ROI proxy.  
-  - **Discover**: normalized vs median channel (e.g., 1.3x). Higher is better.  
-  - **Evaluate**: “views per 1k subs” baseline.
+  - Discover: normalized vs median (e.g., 1.3x).  
+  - Evaluate: views per 1k subs.
 
-**Tier 2**
-- **Growth Momentum**: last 3 videos vs previous recent videos (positive % = improving reach).
-- **Sponsor Saturation**: Low/Medium/High based on sponsor/ad keywords in recent titles.
-- **Audience Trust**: Strong/Medium/Weak proxy using engagement + view stability.
+**Table 3 — Tier 2**
+- **Growth Momentum**: last 3 videos vs older recent videos (positive % = improving reach).
+- **Sponsor Saturation**: how often sponsor/ad terms appear (Low/Medium/High).
+- **Audience Trust**: engagement + stability proxy (Strong/Medium/Weak).
 
-**Tier 3**
+**Table 4 — Tier 3**
 - **Language Purity**:  
-  - **Discover**: % of recent titles matching the selected language.  
-  - **Evaluate**: dominant script purity % (auto-detected from titles).
-- **Product Compatibility**: how naturally your product fits the channel type (Excellent/Mixed).
+  - Discover: % of recent titles matching selected language.  
+  - Evaluate: dominant script purity (auto-detected).
+- **Product Compatibility**: how naturally your product fits the channel type.
 - **Risk Flags**: inactivity, low posting, low engagement, or high volatility.
 
 **Investment Verdict (Evaluate mode)**
-- A final recommendation (Recommended / Maybe / Not Recommended) based on channel type vs product category + Fit Score + engagement.
+- Final recommendation based on product type vs channel type + Fit Score + engagement.
 """)
 
 # ==================================================
-# Session state: mode
+# Session state
 # ==================================================
 if "mode" not in st.session_state:
     st.session_state["mode"] = None
 
 # ==================================================
-# Header UI
+# Header
 # ==================================================
 st.markdown('<div class="content-box">', unsafe_allow_html=True)
 st.title("📺 YouTube Marketing Investment Intelligence Platform")
@@ -586,7 +705,12 @@ if st.session_state["mode"] is None:
     st.stop()
 
 # ==================================================
-# DISCOVER CHANNELS
+# DISCOVER MODE
+# Tables:
+# 1) Channel, Type, Subscribers, Avg Views, Avg Likes, Avg Comments, Engagement, URL
+# 2) Channel, Type, Fit Score, Sponsorship Readiness, Cost Efficiency
+# 3) Channel, Type, Growth Momentum, Sponsor Saturation, Audience Trust
+# 4) Channel, Type, Language Purity, Product Compatibility, Risk Flags
 # ==================================================
 if st.session_state["mode"] == "discover":
     st.markdown('<div class="content-box">', unsafe_allow_html=True)
@@ -598,7 +722,7 @@ if st.session_state["mode"] == "discover":
     with c2:
         language = st.selectbox("Language", COUNTRY_LANGUAGE_MAP.get(country, ["English"]), index=0)
 
-    product = st.text_input("Marketing Product", placeholder="Ex: phone, kitchen gadgets, skincare")
+    product = st.text_input("Marketing Product", placeholder="Ex: watch, phone, cake, air fryer, skincare")
     min_subs = st.number_input("Minimum Subscribers", min_value=0, value=100000, step=10000)
     run = st.button("🚀 Find Channels", type="primary")
     st.markdown("</div>", unsafe_allow_html=True)
@@ -650,7 +774,16 @@ if st.session_state["mode"] == "discover":
                 if not channel_matches_language(a["video_titles"], language):
                     continue
 
-                eff_raw = a["avg_views"] / max(1.0, (a["subs"] / 1000.0))
+                fit = calc_fit_score(product, a["title"], a["desc"], a["video_titles"])
+                sponsor_ready = calc_sponsorship_readiness(a["engagement_ratio"], a["uploads_90d"], a["inactive_days"])
+                growth = calc_growth_momentum(a["views_list"])
+                sat = calc_sponsor_saturation(a["video_titles"])
+                trust = calc_audience_trust(a["engagement_ratio"], a["views_list"])
+                purity = f"{language_purity_percent(a['video_titles'], language)}%"
+                compat = calc_product_compat(a["channel_type"], product)
+                risk = calc_risk_flags(a["engagement_ratio"], a["inactive_days"], a["uploads_90d"], a["views_list"])
+
+                eff_raw = a["avg_views"] / max(1.0, (a["subs"] / 1000.0))  # views per 1k subs (raw for normalization)
 
                 rows.append({
                     # Table 1
@@ -663,20 +796,20 @@ if st.session_state["mode"] == "discover":
                     "Engagement": f"{a['engagement_label']} ({a['engagement_ratio']:.3f})",
                     "Channel URL": a["url"],
 
-                    # Tier 1
-                    "Fit Score": calc_fit_score(product, a["title"], a["desc"], a["video_titles"]),
-                    "Sponsorship Readiness": calc_sponsorship_readiness(a["engagement_ratio"], a["uploads_90d"], a["inactive_days"]),
+                    # Table 2 (Tier 1)
+                    "Fit Score": fit,
+                    "Sponsorship Readiness": sponsor_ready,
                     "_eff_raw": eff_raw,
 
-                    # Tier 2
-                    "Growth Momentum": calc_growth_momentum(a["views_list"]),
-                    "Sponsor Saturation": calc_sponsor_saturation(a["video_titles"]),
-                    "Audience Trust": calc_audience_trust(a["engagement_ratio"], a["views_list"]),
+                    # Table 3 (Tier 2)
+                    "Growth Momentum": growth,
+                    "Sponsor Saturation": sat,
+                    "Audience Trust": trust,
 
-                    # Tier 3
-                    "Language Purity": f"{language_purity_percent(a['video_titles'], language)}%",
-                    "Product Compatibility": calc_product_compat(a["channel_type"], product),
-                    "Risk Flags": calc_risk_flags(a["engagement_ratio"], a["inactive_days"], a["uploads_90d"], a["views_list"]),
+                    # Table 4 (Tier 3)
+                    "Language Purity": purity,
+                    "Product Compatibility": compat,
+                    "Risk Flags": risk,
                 })
 
             if not rows:
@@ -687,7 +820,7 @@ if st.session_state["mode"] == "discover":
 
             df = pd.DataFrame(rows)
 
-            # Normalize cost efficiency as x vs median channel
+            # Normalize cost efficiency as x vs median
             med = df["_eff_raw"].median() if df["_eff_raw"].notna().any() else 0
             df["Cost Efficiency"] = (df["_eff_raw"] / med).map(lambda x: f"{x:.1f}x") if med and med > 0 else "N/A"
             df.drop(columns=["_eff_raw"], inplace=True, errors="ignore")
@@ -735,15 +868,17 @@ if st.session_state["mode"] == "discover":
             st.error(f"YouTube API error: {e}")
 
 # ==================================================
-# EVALUATE A CHANNEL
-# - Adds Investment Verdict card
+# EVALUATE MODE
+# - No country/language input
+# - Adds Investment Verdict (watch tech => recommended, cake tech => not recommended)
+# - Table 1 includes Avg Likes + Avg Comments
 # ==================================================
 if st.session_state["mode"] == "evaluate":
     st.markdown('<div class="content-box">', unsafe_allow_html=True)
     st.subheader("✅ Evaluate a Channel")
 
-    channel_input = st.text_input("Channel Name or URL", placeholder="Ex: Marques Brownlee or https://www.youtube.com/@mkbhd")
-    product_eval = st.text_input("Marketing Product (for Fit Score & Compatibility)", placeholder="Ex: phone, kitchen gadgets, skincare")
+    channel_input = st.text_input("Channel Name or URL", placeholder="Ex: https://www.youtube.com/@Prasadtechintelugu")
+    product_eval = st.text_input("Marketing Product (for Fit Score & Compatibility)", placeholder="Ex: watch, iphone, cake, air fryer")
 
     run_eval = st.button("✅ Evaluate Channel", type="primary")
     st.markdown("</div>", unsafe_allow_html=True)
@@ -776,34 +911,32 @@ if st.session_state["mode"] == "evaluate":
                 st.error("Could not fetch channel details. Try again.")
                 st.stop()
 
-            # Compute insight fields
-            eff_raw = a["avg_views"] / max(1.0, (a["subs"] / 1000.0))
-            cost_eff = f"{eff_raw:.1f} views/1k subs"
-            detected_purity = detect_dominant_script_purity(a["video_titles"])
-
             fit = calc_fit_score(product_eval, a["title"], a["desc"], a["video_titles"])
-            sponsor_ready = calc_sponsorship_readiness(a["engagement_ratio"], a["uploads_90d"], a["inactive_days"])
-            prod_compat = calc_product_compat(a["channel_type"], product_eval)
-            risk = calc_risk_flags(a["engagement_ratio"], a["inactive_days"], a["uploads_90d"], a["views_list"])
-
-            badge, headline, reason = investment_verdict(
+            verdict_label, verdict_reason = investment_verdict_simple(
                 channel_type=a["channel_type"],
-                product=product_eval,
-                fit=fit,
+                product_text=product_eval,
+                fit_score=fit,
                 engagement_ratio=a["engagement_ratio"]
             )
+
+            # Evaluate cost efficiency as raw (views per 1k subs)
+            eff_raw = a["avg_views"] / max(1.0, (a["subs"] / 1000.0))
+            cost_eff = f"{eff_raw:.1f} views/1k subs"
+
+            detected_purity = detect_dominant_script_purity(a["video_titles"])
 
             progress.progress(100)
             time.sleep(0.06)
             progress.empty()
             status_area.markdown("<div class='status-box'>✅ <b>Channel evaluation completed.</b></div>", unsafe_allow_html=True)
 
-            # Investment verdict card
+            # Verdict card
             st.markdown(
                 f"""
                 <div class="verdict-box">
-                  <h3>Investment Verdict: {badge} {headline}</h3>
-                  <div class="small-note">{reason}</div>
+                  <h3>Investment Verdict: {verdict_label}</h3>
+                  <div class="small-note">{verdict_reason}</div>
+                  <div class="small-note"><b>Detected Product Type:</b> {detect_type_from_text(product_eval)} &nbsp; | &nbsp; <b>Channel Type:</b> {a["channel_type"]}</div>
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -824,7 +957,7 @@ if st.session_state["mode"] == "evaluate":
 
                 # Tier 1
                 "Fit Score": fit,
-                "Sponsorship Readiness": sponsor_ready,
+                "Sponsorship Readiness": calc_sponsorship_readiness(a["engagement_ratio"], a["uploads_90d"], a["inactive_days"]),
                 "Cost Efficiency": cost_eff,
 
                 # Tier 2
@@ -834,8 +967,8 @@ if st.session_state["mode"] == "evaluate":
 
                 # Tier 3
                 "Language Purity": detected_purity,
-                "Product Compatibility": prod_compat,
-                "Risk Flags": risk,
+                "Product Compatibility": calc_product_compat(a["channel_type"], product_eval),
+                "Risk Flags": calc_risk_flags(a["engagement_ratio"], a["inactive_days"], a["uploads_90d"], a["views_list"]),
             }
 
             df_eval = pd.DataFrame([row])
