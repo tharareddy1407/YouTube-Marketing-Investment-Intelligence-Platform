@@ -19,11 +19,6 @@ st.set_page_config(
 )
 
 # =========================
-# CSS: remove blocks + style cards
-# =========================
-
-
-# =========================
 # Background image
 # =========================
 def set_local_background(image_path: str):
@@ -209,6 +204,11 @@ st.markdown("<div class='small-note'>⚠️ Hosted on Render free tier. Cold sta
 st.markdown("</div>", unsafe_allow_html=True)
 
 status_area = st.empty()
+
+if st.button("⬅️ Back to Home"):
+    st.session_state["mode"] = None
+    st.rerun()
+
 
 # =========================
 # Landing
