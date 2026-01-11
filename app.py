@@ -19,7 +19,6 @@ st.set_page_config(
     layout="wide",
 )
 
-
 # ==================================================
 # Background image (local -> base64)
 # ==================================================
@@ -34,7 +33,7 @@ def set_local_background(image_path: str):
         <style>
         .stApp {{
           background-image:
-            linear-gradient(rgba(255,255,255,0.88), rgba(255,255,255,0.88)),
+            linear-gradient(rgba(245,247,255,0.96), rgba(245,247,255,0.96)),
             url("data:image/{ext};base64,{encoded}");
           background-size: cover;
           background-position: center;
@@ -106,7 +105,7 @@ LANG_QUERY_HINTS = {
 }
 
 # ==================================================
-# Expanded Channel Type Keywords (for product typing + optional improvements)
+# Expanded Type Keywords (used for product typing + verdict)
 # ==================================================
 TYPE_KEYWORDS = {
     "Tech & Gadgets": [
@@ -131,7 +130,7 @@ TYPE_KEYWORDS = {
         "biryani","dosa","idli","vada","sambar","chutney","curry","dal","roti","paratha",
         "veg","vegetarian","non veg","non-veg","vegan","grill","tandoor","bbq","fry",
         "spices","masala","pickle","pickles","sauce","ketchup","mayonnaise",
-        "cookware","pan","pot","pressure cooker","air fryer","mixer","grinder","oven",
+        "cookware","pan","pot","pressure cooker","air fryer","mixer","grinder","oven","blender",
     ],
     "Beauty & Fashion": [
         "beauty","makeup","skincare","skin care","cosmetics","fashion","style","styling",
@@ -201,14 +200,13 @@ TYPE_KEYWORDS = {
     ],
 }
 
-# product synonym boost (helps “watch” map to tech, “cake” to food)
 PRODUCT_SYNONYMS = {
     "watch": ["watch", "smartwatch", "smart watch", "wearable", "fitness band", "band", "tracker"],
     "cake": ["cake", "cakes", "cupcake", "cupcakes", "pastry", "dessert", "baking"],
 }
 
 # ==================================================
-# Helpers
+# Helper functions
 # ==================================================
 def safe_int(val, default=0):
     try:
@@ -269,13 +267,12 @@ def language_purity_percent(video_titles: List[str], language: str) -> int:
 
 def infer_channel_type(title: str, desc: str, recent_titles: List[str]) -> str:
     """
-    Your existing heuristic classifier.
-    (You can later replace with TYPE_KEYWORDS-weighted scoring if you want.)
+    Lightweight classifier for channel type based on content text.
     """
     text = " ".join([title or "", desc or ""] + (recent_titles or [])).lower()
     taxonomy = [
         ("Tech & Gadgets", ["tech","iphone","android","smartphone","mobile","laptop","review","unboxing","gadget","watch","smartwatch"]),
-        ("Cooking & Food", ["recipe","cooking","kitchen","chef","baking","food","meal prep","dosa","biryani","cake"]),
+        ("Cooking & Food", ["recipe","cooking","kitchen","chef","baking","food","meal prep","dosa","biryani","cake","dessert"]),
         ("Beauty & Fashion", ["makeup","skincare","beauty","fashion","outfit","haul"]),
         ("Fitness & Health", ["fitness","workout","gym","yoga","health","diet"]),
         ("Education & Tutorials", ["tutorial","learn","course","lecture","explained","how to","tips"]),
@@ -331,7 +328,7 @@ def resolve_channel_id(youtube_client, channel_input: str):
     return items[0]["snippet"]["channelId"]
 
 # ==================================================
-# Product typing + verdict (watch->tech, cake->food, etc.)
+# Product typing + investment verdict logic
 # ==================================================
 def detect_type_from_text(text: str) -> str:
     """
@@ -368,7 +365,7 @@ def investment_verdict_simple(channel_type: str, product_text: str, fit_score: i
     product_type = detect_type_from_text(product_text)
     p = (product_text or "").lower()
 
-    # Category match => never harsh reject just because fit overlap is low
+    # Category match => never harsh reject only due to low overlap
     if product_type != "General" and channel_type == product_type:
         if fit_score >= 55 or engagement_ratio >= 0.05:
             return "🟢 Recommended", f"Product type **{product_type}** matches channel type **{channel_type}**."
@@ -492,8 +489,8 @@ def fetch_channel_analysis(channel_id: str):
         vid = v.get("id")
         s = v.get("statistics", {}) or {}
         views_map[vid] = safe_int(s.get("viewCount", 0))
-        likes_map[vid] = safe_int(s.get("likeCount", 0))
-        comments_map[vid] = safe_int(s.get("commentCount", 0))
+        likes_map[vid] = safe_int(s.get("likeCount", 0))       # may be hidden
+        comments_map[vid] = safe_int(s.get("commentCount", 0)) # may be hidden
 
     views_list = [views_map.get(vid, 0) for vid in video_ids]
     likes_list = [likes_map.get(vid, 0) for vid in video_ids]
@@ -534,7 +531,6 @@ def fetch_channel_analysis(channel_id: str):
 SPONSOR_WORDS = ["sponsored", "ad", "paid partnership", "promo", "promotion", "brought to you by", "partnered with"]
 
 def calc_fit_score(product: str, title: str, desc: str, video_titles: List[str]) -> int:
-    # overlap-based fit score 0-100
     p_tokens = set(tokenize(product))
     if not p_tokens:
         return 0
@@ -555,7 +551,6 @@ def calc_sponsorship_readiness(eng_ratio: float, uploads_90d: int, inactive_days
     return "🔴 Low"
 
 def calc_growth_momentum(views_list: List[int]) -> str:
-    # compare last3 vs previous videos
     if not views_list or len(views_list) < 6:
         return "N/A"
     last3 = views_list[:3]
@@ -576,7 +571,6 @@ def calc_sponsor_saturation(video_titles: List[str]) -> str:
     return "🟢 Low"
 
 def calc_audience_trust(eng_ratio: float, views_list: List[int]) -> str:
-    # proxy: engagement + view stability (lower volatility better)
     if not views_list:
         return "N/A"
     mean = sum(views_list) / max(1, len(views_list))
@@ -595,12 +589,10 @@ def calc_audience_trust(eng_ratio: float, views_list: List[int]) -> str:
     return "🔴 Weak"
 
 def calc_product_compat(channel_type: str, product: str) -> str:
-    # simple compatibility: use detected product type vs channel type
     product_type = detect_type_from_text(product)
     if product_type != "General" and product_type == channel_type:
         return "🟢 Excellent"
     if channel_type == "Tech & Gadgets" and product_type == "Cooking & Food":
-        # allow kitchen gadgets
         p = (product or "").lower()
         kitchen_gadget_terms = ["air fryer","mixer","grinder","oven","cookware","pan","pot","kitchen gadget","kitchen","blender"]
         if any(k in p for k in kitchen_gadget_terms):
@@ -625,7 +617,7 @@ def calc_risk_flags(eng_ratio: float, inactive_days: int, uploads_90d: int, view
     return "✅ None" if not flags else "⚠️ " + "; ".join(flags)
 
 # ==================================================
-# Glossary
+# Glossary + About
 # ==================================================
 def render_glossary():
     with st.expander("ℹ️ Metrics Glossary (What each insight means)"):
@@ -662,6 +654,14 @@ def render_glossary():
 - Final recommendation based on product type vs channel type + Fit Score + engagement.
 """)
 
+def render_about():
+    with st.expander("About this project"):
+        st.write(
+            "Built by Thara Reddy Kankanala — Data & Analytics Engineer. "
+            "This project explores how AI-assisted analytics can help businesses "
+            "make better marketing investment decisions on YouTube."
+        )
+
 # ==================================================
 # Session state
 # ==================================================
@@ -676,6 +676,8 @@ st.title("📺 YouTube Marketing Investment Intelligence Platform")
 st.write("Choose a mode below to continue.")
 st.markdown("<div class='small-note'>⚠️ Render free tier may take 30–60 seconds on first load.</div>", unsafe_allow_html=True)
 st.markdown("</div>", unsafe_allow_html=True)
+
+render_about()  # ✅ Add AI-assisted "About this project" expander globally
 
 status_area = st.empty()
 
@@ -702,6 +704,8 @@ if st.session_state["mode"] is None:
             st.session_state["mode"] = "evaluate"
             st.rerun()
     st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown('<div class="footer">Built by <b>Thara Reddy Kankanala</b> · AI-assisted decision intelligence</div>', unsafe_allow_html=True)
     st.stop()
 
 # ==================================================
@@ -862,6 +866,8 @@ if st.session_state["mode"] == "discover":
             st.dataframe(df[t3_cols], use_container_width=True, hide_index=True)
             st.markdown("</div>", unsafe_allow_html=True)
 
+            st.markdown('<div class="footer">Built by <b>Thara Reddy Kankanala</b> · AI-assisted decision intelligence</div>', unsafe_allow_html=True)
+
         except Exception as e:
             progress.empty()
             status_area.empty()
@@ -877,7 +883,7 @@ if st.session_state["mode"] == "evaluate":
     st.markdown('<div class="content-box">', unsafe_allow_html=True)
     st.subheader("✅ Evaluate a Channel")
 
-    channel_input = st.text_input("Channel Name or URL", placeholder="Ex: https://www.youtube.com/@Tharareddy")
+    channel_input = st.text_input("Channel Name or URL", placeholder="Ex: https://www.youtube.com/@Prasadtechintelugu")
     product_eval = st.text_input("Marketing Product (for Fit Score & Compatibility)", placeholder="Ex: watch, iphone, cake, air fryer")
 
     run_eval = st.button("✅ Evaluate Channel", type="primary")
@@ -955,17 +961,17 @@ if st.session_state["mode"] == "evaluate":
                 "Engagement": f"{a['engagement_label']} ({a['engagement_ratio']:.3f})",
                 "Channel URL": a["url"],
 
-                # Tier 1
+                # Table 2 (Tier 1)
                 "Fit Score": fit,
                 "Sponsorship Readiness": calc_sponsorship_readiness(a["engagement_ratio"], a["uploads_90d"], a["inactive_days"]),
                 "Cost Efficiency": cost_eff,
 
-                # Tier 2
+                # Table 3 (Tier 2)
                 "Growth Momentum": calc_growth_momentum(a["views_list"]),
                 "Sponsor Saturation": calc_sponsor_saturation(a["video_titles"]),
                 "Audience Trust": calc_audience_trust(a["engagement_ratio"], a["views_list"]),
 
-                # Tier 3
+                # Table 4 (Tier 3)
                 "Language Purity": detected_purity,
                 "Product Compatibility": calc_product_compat(a["channel_type"], product_eval),
                 "Risk Flags": calc_risk_flags(a["engagement_ratio"], a["inactive_days"], a["uploads_90d"], a["views_list"]),
@@ -1008,6 +1014,8 @@ if st.session_state["mode"] == "evaluate":
                 if t.strip():
                     st.write(f"• {t}")
             st.markdown("</div>", unsafe_allow_html=True)
+
+            st.markdown('<div class="footer">Built by <b>Thara Reddy Kankanala</b> · AI-assisted decision intelligence</div>', unsafe_allow_html=True)
 
         except Exception as e:
             progress.empty()
