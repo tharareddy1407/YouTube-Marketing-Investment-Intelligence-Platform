@@ -205,9 +205,13 @@ st.markdown("</div>", unsafe_allow_html=True)
 
 status_area = st.empty()
 
-if st.button("⬅️ Back to Home"):
-    st.session_state["mode"] = None
-    st.rerun()
+if st.session_state.get("mode") is not None:
+    _, _, col = st.columns([6, 6, 2])
+    with col:
+        if st.button("⬅️ Home"):
+            st.session_state["mode"] = None
+            st.rerun()
+
 
 
 # =========================
