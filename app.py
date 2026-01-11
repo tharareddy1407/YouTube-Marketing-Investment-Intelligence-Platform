@@ -15,30 +15,25 @@ from googleapiclient.discovery import build
 # ==================================================
 st.set_page_config(
     page_title="YouTube Marketing Investment Intelligence Platform",
-    layout="wide"
+    layout="wide",
 )
 
 # ==================================================
-# CSS: Hide Streamlit chrome + remove top white blocks + UI styling
+# SAFE CSS (does NOT hide main content)
 # ==================================================
 st.markdown(
     """
 <style>
-/* --- Hide Streamlit UI chrome --- */
+/* Hide Streamlit chrome safely */
 header[data-testid="stHeader"] { display: none !important; }
 div[data-testid="stToolbar"] { display: none !important; }
 div[data-testid="stDecoration"] { display: none !important; }
 footer { visibility: hidden !important; }
 
-/* --- Remove/Hide the extra top containers that appear as white rounded bars --- */
-div[data-testid="stAppViewContainer"] > .main > div:first-child { display: none !important; }
-div[data-testid="stMainBlockContainer"] > div:first-child { display: none !important; }
+/* Remove extra top padding */
+.block-container { padding-top: 1.2rem !important; }
 
-/* --- Remove extra padding that makes the top bar visible --- */
-.block-container { padding-top: 0.8rem !important; }
-div[data-testid="stAppViewContainer"] .main { padding-top: 0 !important; }
-
-/* --- Background-friendly cards --- */
+/* Card styles */
 .content-box {
     background: rgba(255, 255, 255, 0.965);
     padding: 1.8rem;
@@ -58,7 +53,7 @@ div[data-testid="stAppViewContainer"] .main { padding-top: 0 !important; }
 h1, h2, h3 { color: #0f172a; font-weight: 900; }
 p, span, div, label { color: #1f2937; font-size: 1rem; }
 
-/* Make buttons look nicer */
+/* Buttons */
 .stButton > button {
     border-radius: 14px !important;
     padding: 0.8rem 1rem !important;
@@ -66,7 +61,7 @@ p, span, div, label { color: #1f2937; font-size: 1rem; }
 }
 </style>
 """,
-    unsafe_allow_html=True
+    unsafe_allow_html=True,
 )
 
 # ==================================================
@@ -94,20 +89,17 @@ def set_local_background(image_path: str):
         }}
         </style>
         """,
-        unsafe_allow_html=True
+        unsafe_allow_html=True,
     )
 
 set_local_background("assets/background.png")
 
 # ==================================================
-# Country -> Language options (Dynamic)
+# Country -> Language
 # ==================================================
 COUNTRY_LANGUAGE_MAP = {
     "USA": ["English", "Spanish"],
-    "India": [
-        "Hindi", "English", "Telugu", "Tamil", "Kannada", "Malayalam",
-        "Marathi", "Bengali", "Gujarati", "Punjabi", "Urdu", "Odia"
-    ],
+    "India": ["Hindi", "English", "Telugu", "Tamil", "Kannada", "Malayalam", "Marathi", "Bengali", "Gujarati", "Punjabi", "Urdu", "Odia"],
     "UK": ["English", "Welsh", "Scottish Gaelic", "Irish"],
     "Canada": ["English", "French"],
     "Australia": ["English"],
@@ -115,7 +107,6 @@ COUNTRY_LANGUAGE_MAP = {
     "Singapore": ["English", "Mandarin", "Malay", "Tamil"],
 }
 
-# YouTube regionCode (ISO 3166-1 alpha-2)
 COUNTRY_REGION_CODE = {
     "USA": "US",
     "India": "IN",
@@ -142,14 +133,6 @@ def days_ago(iso_date: str) -> int:
     except Exception:
         return 9999
 
-def tokenize(text: str) -> set:
-    text = (text or "").lower()
-    text = re.sub(r"[^a-z0-9\s]", " ", text)
-    return set(w for w in text.split() if len(w) > 2)
-
-def clamp(x, lo, hi):
-    return max(lo, min(hi, x))
-
 def engagement_label(engagement_ratio: float) -> str:
     if engagement_ratio >= 0.15:
         return "🟢 High"
@@ -160,7 +143,7 @@ def engagement_label(engagement_ratio: float) -> str:
 def infer_channel_type(title: str, desc: str, recent_titles: list[str]) -> str:
     text = " ".join([title or "", desc or ""] + (recent_titles or [])).lower()
     taxonomy = [
-        ("Tech & Gadgets", ["tech", "iphone", "android", "smartphone", "mobile", "laptop", "pc", "review", "unboxing", "gadget"]),
+        ("Tech & Gadgets", ["tech", "iphone", "android", "smartphone", "mobile", "laptop", "review", "unboxing", "gadget"]),
         ("Cooking & Food", ["recipe", "cooking", "kitchen", "chef", "baking", "food", "meal prep", "dosa", "biryani"]),
         ("Beauty & Fashion", ["makeup", "skincare", "beauty", "fashion", "outfit", "haul"]),
         ("Fitness & Health", ["fitness", "workout", "gym", "yoga", "health", "diet"]),
@@ -212,13 +195,14 @@ def resolve_channel_id(youtube_client, channel_input: str):
         type="channel",
         maxResults=1
     ).execute()
+
     items = resp.get("items", [])
     if not items:
         return None
     return items[0]["snippet"]["channelId"]
 
 # ==================================================
-# YouTube API Key
+# YouTube API
 # ==================================================
 API_KEY = os.getenv("YOUTUBE_API_KEY", "").strip()
 if not API_KEY:
@@ -227,15 +211,8 @@ if not API_KEY:
 
 youtube = build("youtube", "v3", developerKey=API_KEY)
 
-# ==================================================
-# Fetch channel analysis
-# ==================================================
 def fetch_channel_analysis(channel_id: str):
-    ch_resp = youtube.channels().list(
-        part="snippet,statistics,contentDetails",
-        id=channel_id
-    ).execute()
-
+    ch_resp = youtube.channels().list(part="snippet,statistics,contentDetails", id=channel_id).execute()
     items = ch_resp.get("items", [])
     if not items:
         return None
@@ -255,12 +232,7 @@ def fetch_channel_analysis(channel_id: str):
     if not uploads_id:
         return None
 
-    vids_res = youtube.playlistItems().list(
-        part="snippet",
-        playlistId=uploads_id,
-        maxResults=10
-    ).execute()
-
+    vids_res = youtube.playlistItems().list(part="snippet", playlistId=uploads_id, maxResults=10).execute()
     video_ids, video_titles, published_days = [], [], []
     for it in vids_res.get("items", []):
         sn = it.get("snippet", {})
@@ -286,7 +258,6 @@ def fetch_channel_analysis(channel_id: str):
     ch_type = infer_channel_type(title, desc, video_titles)
 
     return {
-        "channel_id": channel_id,
         "title": title,
         "desc": desc,
         "subs": subs,
@@ -300,13 +271,14 @@ def fetch_channel_analysis(channel_id: str):
         "engagement_label": engagement_label(float(engagement_ratio)),
         "channel_type": ch_type,
         "url": f"https://www.youtube.com/channel/{channel_id}",
+        "channel_id": channel_id,
     }
 
 # ==================================================
-# Session State: Landing mode
+# Session State
 # ==================================================
 if "mode" not in st.session_state:
-    st.session_state["mode"] = None  # None => landing
+    st.session_state["mode"] = None  # landing
 
 # ==================================================
 # Header
@@ -315,12 +287,12 @@ st.markdown('<div class="content-box">', unsafe_allow_html=True)
 st.title("📺 YouTube Marketing Investment Intelligence Platform")
 st.write("Choose a mode below to continue.")
 st.markdown("<div class='small-note'>⚠️ Hosted on Render free tier. Cold start may take 30–60 seconds.</div>", unsafe_allow_html=True)
-st.markdown('</div>', unsafe_allow_html=True)
+st.markdown("</div>", unsafe_allow_html=True)
 
 status_area = st.empty()
 
 # ==================================================
-# Landing Page: Two options in middle
+# Landing (2 centered buttons)
 # ==================================================
 if st.session_state["mode"] is None:
     st.markdown('<div class="content-box">', unsafe_allow_html=True)
@@ -333,12 +305,11 @@ if st.session_state["mode"] is None:
         if st.button("✅ Evaluate a Channel", use_container_width=True):
             st.session_state["mode"] = "evaluate"
             st.rerun()
-    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
     st.stop()
 
 # ==================================================
-# Discover Channels
-# Inputs: country -> state -> language -> product -> min subs
+# Discover Channels flow
 # ==================================================
 if st.session_state["mode"] == "discover":
     st.markdown('<div class="content-box">', unsafe_allow_html=True)
@@ -356,7 +327,7 @@ if st.session_state["mode"] == "discover":
     min_subs = st.number_input("Minimum Subscribers", min_value=0, value=100000, step=10000)
 
     run = st.button("🚀 Find Channels", type="primary")
-    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
     if run:
         if not product.strip():
@@ -364,14 +335,10 @@ if st.session_state["mode"] == "discover":
             st.stop()
 
         region_code = COUNTRY_REGION_CODE.get(country, "US")
-
-        status_area.markdown(
-            "<div class='status-box'>🔎 <b>Checking with YouTube...</b> Results are on the way ✅</div>",
-            unsafe_allow_html=True
-        )
+        status_area.markdown("<div class='status-box'>🔎 <b>Checking with YouTube...</b> Results are on the way ✅</div>", unsafe_allow_html=True)
         progress = st.progress(0)
-        progress.progress(15)
-        time.sleep(0.1)
+        progress.progress(20)
+        time.sleep(0.08)
 
         try:
             search_response = youtube.search().list(
@@ -381,13 +348,13 @@ if st.session_state["mode"] == "discover":
                 maxResults=25,
                 regionCode=region_code
             ).execute()
-            progress.progress(45)
+            progress.progress(55)
 
             channel_ids = [item["snippet"]["channelId"] for item in search_response.get("items", [])]
             if not channel_ids:
                 progress.empty()
                 status_area.empty()
-                st.warning("No channels found. Try a broader product keyword.")
+                st.warning("No channels found. Try a broader keyword.")
                 st.stop()
 
             rows = []
@@ -408,12 +375,10 @@ if st.session_state["mode"] == "discover":
                     "Channel URL": a["url"],
                 })
 
-            progress.progress(90)
-
             if not rows:
                 progress.empty()
                 status_area.empty()
-                st.warning("No channels matched. Try reducing Minimum Subscribers or changing product keyword.")
+                st.warning("No channels matched. Try reducing Minimum Subscribers.")
                 st.stop()
 
             df = pd.DataFrame(rows).sort_values("Subscribers", ascending=False).head(20)
@@ -422,29 +387,22 @@ if st.session_state["mode"] == "discover":
             time.sleep(0.06)
             progress.empty()
 
-            status_area.markdown(
-                "<div class='status-box'>✅ <b>Results are ready!</b> Top channels by subscribers are below.</div>",
-                unsafe_allow_html=True
-            )
+            status_area.markdown("<div class='status-box'>✅ <b>Results are ready!</b></div>", unsafe_allow_html=True)
 
             st.markdown('<div class="content-box">', unsafe_allow_html=True)
             st.subheader("✅ Results")
             st.write(f"**Country:** {country} | **State:** {state or 'N/A'} | **Language:** {language}")
             st.write(f"**Marketing Product:** {product} | **Minimum Subscribers:** {min_subs:,}")
 
-            st.dataframe(
-                df[["Channel", "Type", "Subscribers", "Avg Views (Last 10)", "Engagement", "Total Views", "Channel URL"]],
-                use_container_width=True,
-                hide_index=True
-            )
+            st.dataframe(df, use_container_width=True, hide_index=True)
 
             st.download_button(
                 "⬇️ Download CSV",
                 data=df.to_csv(index=False).encode("utf-8"),
                 file_name="discover_channels.csv",
-                mime="text/csv"
+                mime="text/csv",
             )
-            st.markdown('</div>', unsafe_allow_html=True)
+            st.markdown("</div>", unsafe_allow_html=True)
 
         except Exception as e:
             progress.empty()
@@ -452,32 +410,24 @@ if st.session_state["mode"] == "discover":
             st.error(f"Something went wrong while calling YouTube API: {e}")
 
 # ==================================================
-# Evaluate a Channel
-# Input: Channel Name or URL
-# Output: engagement score + channel type + stats
+# Evaluate Channel flow
 # ==================================================
 if st.session_state["mode"] == "evaluate":
     st.markdown('<div class="content-box">', unsafe_allow_html=True)
     st.subheader("✅ Evaluate a Channel")
-    channel_input = st.text_input(
-        "Channel Name or URL",
-        placeholder="Ex: Marques Brownlee OR https://www.youtube.com/@mkbhd"
-    )
+    channel_input = st.text_input("Channel Name or URL", placeholder="Ex: Marques Brownlee or https://www.youtube.com/@mkbhd")
     run = st.button("✅ Evaluate Channel", type="primary")
-    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
     if run:
         if not channel_input.strip():
             st.warning("Please enter a channel name or URL.")
             st.stop()
 
-        status_area.markdown(
-            "<div class='status-box'>🔎 <b>Checking this channel with YouTube...</b> Results are on the way ✅</div>",
-            unsafe_allow_html=True
-        )
+        status_area.markdown("<div class='status-box'>🔎 <b>Checking this channel with YouTube...</b> Results are on the way ✅</div>", unsafe_allow_html=True)
         progress = st.progress(0)
-        progress.progress(20)
-        time.sleep(0.1)
+        progress.progress(25)
+        time.sleep(0.08)
 
         try:
             channel_id = resolve_channel_id(youtube, channel_input)
@@ -486,8 +436,6 @@ if st.session_state["mode"] == "evaluate":
                 status_area.empty()
                 st.error("Could not find that channel. Try another name or paste the channel URL.")
                 st.stop()
-
-            progress.progress(55)
 
             a = fetch_channel_analysis(channel_id)
             if not a:
@@ -500,10 +448,7 @@ if st.session_state["mode"] == "evaluate":
             time.sleep(0.06)
             progress.empty()
 
-            status_area.markdown(
-                "<div class='status-box'>✅ <b>Channel evaluation completed.</b></div>",
-                unsafe_allow_html=True
-            )
+            status_area.markdown("<div class='status-box'>✅ <b>Channel evaluation completed.</b></div>", unsafe_allow_html=True)
 
             st.markdown('<div class="content-box">', unsafe_allow_html=True)
             st.subheader("📌 Channel Summary")
@@ -517,22 +462,4 @@ if st.session_state["mode"] == "evaluate":
             st.write(f"**Channel Name:** {a['title']}")
             st.write(f"**Channel Type:** {a['channel_type']}")
             st.write(f"**Total Views:** {a['total_views']:,}")
-            st.write(f"**Total Videos:** {a['video_count']:,}")
-            st.write(f"**Uploads (Last 90 days):** {a['uploads_90d']}")
-            st.write(f"**Last Upload (days ago):** {a['inactive_days']}")
-
-            st.write("**Channel URL:**")
-            st.write(a["url"])
-            st.markdown('</div>', unsafe_allow_html=True)
-
-            st.markdown('<div class="content-box">', unsafe_allow_html=True)
-            st.subheader("📺 Recent Video Titles (Last 10)")
-            for t in a["video_titles"]:
-                if t.strip():
-                    st.write(f"• {t}")
-            st.markdown('</div>', unsafe_allow_html=True)
-
-        except Exception as e:
-            progress.empty()
-            status_area.empty()
-            st.error(f"Something went wrong while calling YouTube API: {e}")
+            st.write(f"**Total Videos:** {a
