@@ -401,8 +401,15 @@ def detect_dominant_script_purity(video_titles: List[str]) -> str:
         if not matched_any:
             latin_count += 1
 
+    best_name = "Latin"
+    best_count = latin_count
+    for name, c in counts.items():
+        if c > best_count:
+            best_name = name
+            best_count = c
+
     purity = int(round((best_count / total) * 100))
-    return f"{purity}%"
+    return f"{purity}% "
 
 # ==================================================
 # YouTube API
@@ -830,7 +837,7 @@ if st.session_state["mode"] == "evaluate":
     st.markdown('<div class="content-box">', unsafe_allow_html=True)
     st.subheader("✅ Evaluate a Channel")
 
-    channel_input = st.text_input("Channel Name or URL", placeholder="Ex: https://www.youtube.com/@TharaReddy")
+    channel_input = st.text_input("Channel Name or URL", placeholder="Ex: https://www.youtube.com/@TharaReddyKankanala")
     product_eval = st.text_input("Marketing Product (for Fit Score & Compatibility)", placeholder="Ex: watch, iphone, cake, air fryer")
 
     run_eval = st.button("✅ Evaluate Channel", type="primary")
