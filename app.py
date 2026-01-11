@@ -33,7 +33,7 @@ def set_local_background(image_path: str):
         <style>
         .stApp {{
           background-image:
-            linear-gradient(rgba(245,247,255,0.96), rgba(245,247,255,0.96)),
+            linear-gradient(rgba(245,247,255,0.93), rgba(245,247,255,0.93)),
             url("data:image/{ext};base64,{encoded}");
           background-size: cover;
           background-position: center;
