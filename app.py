@@ -5,7 +5,7 @@ import base64
 from pathlib import Path
 from datetime import datetime, timezone
 import urllib.parse as urlparse
-from typing import Dict, List
+from typing import Dict, List, Optional, Tuple
 
 import streamlit as st
 import pandas as pd
@@ -141,21 +141,17 @@ def channel_matches_language(video_titles: List[str], language: str) -> bool:
         return bool(re.search(pattern, titles_text))
 
     t = titles_text.lower()
-
     if language == "Spanish":
         return (any(w in t for w in [" el ", " la ", " de ", " y ", " que ", " para ", " con "])
                 or any(c in t for c in "áéíóúñ"))
-
     if language == "French":
         return (any(w in t for w in [" le ", " la ", " de ", " et ", " pour ", " avec ", " que "])
                 or any(c in t for c in "àâçéèêëîïôùûüÿœ"))
-
     if language == "English":
         return not bool(re.search(
             r"[\u0600-\u06FF\u0900-\u097F\u0980-\u09FF\u0A00-\u0A7F\u0A80-\u0AFF\u0B00-\u0B7F\u0B80-\u0BFF\u0C00-\u0CFF\u0D00-\u0D7F]",
             titles_text
         ))
-
     return True
 
 def language_purity_percent(video_titles: List[str], language: str) -> int:
@@ -220,6 +216,50 @@ def resolve_channel_id(youtube_client, channel_input: str):
     return items[0]["snippet"]["channelId"]
 
 # ==================================================
+# Evaluate-mode: detect dominant script (no country/language input needed)
+# ==================================================
+SCRIPT_BUCKETS: List[Tuple[str, str]] = [
+    ("Telugu", r"[\u0C00-\u0C7F]"),
+    ("Devanagari", r"[\u0900-\u097F]"),   # Hindi/Marathi
+    ("Tamil", r"[\u0B80-\u0BFF]"),
+    ("Kannada", r"[\u0C80-\u0CFF]"),
+    ("Malayalam", r"[\u0D00-\u0D7F]"),
+    ("Bengali", r"[\u0980-\u09FF]"),
+    ("Gujarati", r"[\u0A80-\u0AFF]"),
+    ("Gurmukhi", r"[\u0A00-\u0A7F]"),
+    ("Odia", r"[\u0B00-\u0B7F]"),
+    ("ArabicScript", r"[\u0600-\u06FF]"),
+]
+
+def detect_dominant_script_purity(video_titles: List[str]) -> str:
+    if not video_titles:
+        return "N/A"
+    total = len(video_titles)
+    counts = {name: 0 for name, _ in SCRIPT_BUCKETS}
+    latin_count = 0
+
+    for t in video_titles:
+        matched_any = False
+        for name, pattern in SCRIPT_BUCKETS:
+            if re.search(pattern, t or ""):
+                counts[name] += 1
+                matched_any = True
+        if not matched_any:
+            # treat as Latin/English-like bucket
+            latin_count += 1
+
+    # find dominant bucket
+    best_name = "Latin"
+    best_count = latin_count
+    for name, c in counts.items():
+        if c > best_count:
+            best_name = name
+            best_count = c
+
+    purity = int(round((best_count / total) * 100))
+    return f"{purity}% ({best_name})"
+
+# ==================================================
 # YouTube API setup
 # ==================================================
 API_KEY = os.getenv("YOUTUBE_API_KEY", "").strip()
@@ -231,7 +271,7 @@ youtube = build("youtube", "v3", developerKey=API_KEY)
 
 def fetch_channel_analysis(channel_id: str):
     """
-    Returns: channel stats + last 10 titles + aligned last 10 view counts
+    Returns: channel stats + last 10 titles + aligned last 10 view/like/comment counts
     """
     ch_resp = youtube.channels().list(part="snippet,statistics,contentDetails", id=channel_id).execute()
     items = ch_resp.get("items", [])
@@ -247,7 +287,6 @@ def fetch_channel_analysis(channel_id: str):
     desc = snippet.get("description", "")
     subs = safe_int(stats.get("subscriberCount", 0))
     total_views = safe_int(stats.get("viewCount", 0))
-    video_count = safe_int(stats.get("videoCount", 0))
 
     uploads_id = cd.get("relatedPlaylists", {}).get("uploads")
     if not uploads_id:
@@ -270,10 +309,25 @@ def fetch_channel_analysis(channel_id: str):
         return None
 
     vstats = youtube.videos().list(part="statistics", id=",".join(video_ids)).execute()
-    views_map = {v["id"]: safe_int(v.get("statistics", {}).get("viewCount", 0)) for v in vstats.get("items", [])}
+
+    views_map = {}
+    likes_map = {}
+    comments_map = {}
+    for v in vstats.get("items", []):
+        vid = v.get("id")
+        s = v.get("statistics", {}) or {}
+        views_map[vid] = safe_int(s.get("viewCount", 0))
+        likes_map[vid] = safe_int(s.get("likeCount", 0))       # may be hidden -> missing
+        comments_map[vid] = safe_int(s.get("commentCount", 0)) # may be hidden -> missing
+
     views_list = [views_map.get(vid, 0) for vid in video_ids]
+    likes_list = [likes_map.get(vid, 0) for vid in video_ids]
+    comments_list = [comments_map.get(vid, 0) for vid in video_ids]
 
     avg_views = int(sum(views_list) / max(len(views_list), 1))
+    avg_likes = int(sum(likes_list) / max(len(likes_list), 1))
+    avg_comments = int(sum(comments_list) / max(len(comments_list), 1))
+
     inactive_days = min(published_days) if published_days else 9999
     uploads_90d = sum(1 for d in published_days if d <= 90)
     engagement_ratio = avg_views / max(subs, 1)
@@ -284,8 +338,9 @@ def fetch_channel_analysis(channel_id: str):
         "desc": desc,
         "subs": subs,
         "total_views": total_views,
-        "video_count": video_count,
         "avg_views": avg_views,
+        "avg_likes": avg_likes,
+        "avg_comments": avg_comments,
         "inactive_days": inactive_days,
         "uploads_90d": uploads_90d,
         "video_titles": video_titles,
@@ -297,7 +352,7 @@ def fetch_channel_analysis(channel_id: str):
     }
 
 # ==================================================
-# 9 Insights calculations
+# Insights calculations
 # ==================================================
 SPONSOR_WORDS = ["sponsored", "ad", "paid partnership", "promo", "promotion", "brought to you by", "partnered with"]
 
@@ -426,8 +481,8 @@ if st.session_state["mode"] is None:
     st.stop()
 
 # ==================================================
-# DISCOVER CHANNELS
-# - 4 separate tables (base + tier1 + tier2 + tier3)
+# DISCOVER CHANNELS (4 tables)
+# Table 1 includes Avg Likes + Avg Comments
 # ==================================================
 if st.session_state["mode"] == "discover":
     st.markdown('<div class="content-box">', unsafe_allow_html=True)
@@ -498,6 +553,8 @@ if st.session_state["mode"] == "discover":
                     "Type": a["channel_type"],
                     "Subscribers": a["subs"],
                     "Avg Views": a["avg_views"],
+                    "Avg Likes": a["avg_likes"],
+                    "Avg Comments": a["avg_comments"],
                     "Engagement": f"{a['engagement_label']} ({a['engagement_ratio']:.3f})",
                     "Channel URL": a["url"],
 
@@ -534,10 +591,10 @@ if st.session_state["mode"] == "discover":
             progress.empty()
             status_area.markdown("<div class='status-box'>✅ <b>Results are ready!</b></div>", unsafe_allow_html=True)
 
-            # TABLE 1 (Base)
+            # TABLE 1
             st.markdown('<div class="content-box">', unsafe_allow_html=True)
             st.subheader("Table 1 — Base Channel Metrics")
-            base_cols = ["Channel", "Type", "Subscribers", "Avg Views", "Engagement", "Channel URL"]
+            base_cols = ["Channel", "Type", "Subscribers", "Avg Views", "Avg Likes", "Avg Comments", "Engagement", "Channel URL"]
             st.dataframe(df[base_cols], use_container_width=True, hide_index=True)
             st.markdown("</div>", unsafe_allow_html=True)
 
@@ -568,22 +625,17 @@ if st.session_state["mode"] == "discover":
             st.error(f"YouTube API error: {e}")
 
 # ==================================================
-# EVALUATE A CHANNEL
-# - Add Table 1, Table 2 (Tier1), Table 3 (Tier2), Table 4 (Tier3)
+# EVALUATE A CHANNEL (4 tables)
+# - Table 1 includes Avg Likes + Avg Comments
+# - Country/Language inputs REMOVED
+# - Language Purity uses detected dominant script purity
 # ==================================================
 if st.session_state["mode"] == "evaluate":
     st.markdown('<div class="content-box">', unsafe_allow_html=True)
     st.subheader("✅ Evaluate a Channel")
 
-    # We need country+language here for Tier-3 language purity. Keep minimal but required.
-    c1, c2 = st.columns(2)
-    with c1:
-        country_eval = st.selectbox("Country (for language scoring)", list(COUNTRY_LANGUAGE_MAP.keys()), index=0, key="eval_country")
-    with c2:
-        language_eval = st.selectbox("Language (for language scoring)", COUNTRY_LANGUAGE_MAP.get(country_eval, ["English"]), index=0, key="eval_language")
-
     channel_input = st.text_input("Channel Name or URL", placeholder="Ex: Marques Brownlee or https://www.youtube.com/@mkbhd")
-    product_eval = st.text_input("Marketing Product (for fit scoring)", placeholder="Ex: phone, kitchen gadgets, skincare")
+    product_eval = st.text_input("Marketing Product (for Fit Score & Compatibility)", placeholder="Ex: phone, kitchen gadgets, skincare")
 
     run_eval = st.button("✅ Evaluate Channel", type="primary")
     st.markdown("</div>", unsafe_allow_html=True)
@@ -616,27 +668,36 @@ if st.session_state["mode"] == "evaluate":
                 st.error("Could not fetch channel details. Try again.")
                 st.stop()
 
-            # Compute all Tier insights for this single channel
+            # Single channel cost efficiency -> show raw value (views per 1k subs)
             eff_raw = a["avg_views"] / max(1.0, (a["subs"] / 1000.0))
-            cost_eff = "1.0x"  # single-channel baseline
+            cost_eff = f"{eff_raw:.1f} views/1k subs"
+
+            # Language purity: detected dominant script
+            detected_purity = detect_dominant_script_purity(a["video_titles"])
 
             row = {
+                # Base
                 "Channel": a["title"],
                 "Type": a["channel_type"],
                 "Subscribers": a["subs"],
                 "Avg Views": a["avg_views"],
+                "Avg Likes": a["avg_likes"],
+                "Avg Comments": a["avg_comments"],
                 "Engagement": f"{a['engagement_label']} ({a['engagement_ratio']:.3f})",
                 "Channel URL": a["url"],
 
+                # Tier 1
                 "Fit Score": calc_fit_score(product_eval, a["title"], a["desc"], a["video_titles"]),
                 "Sponsorship Readiness": calc_sponsorship_readiness(a["engagement_ratio"], a["uploads_90d"], a["inactive_days"]),
                 "Cost Efficiency": cost_eff,
 
+                # Tier 2
                 "Growth Momentum": calc_growth_momentum(a["views_list"]),
                 "Sponsor Saturation": calc_sponsor_saturation(a["video_titles"]),
                 "Audience Trust": calc_audience_trust(a["engagement_ratio"], a["views_list"]),
 
-                "Language Purity": f"{language_purity_percent(a['video_titles'], language_eval)}%",
+                # Tier 3
+                "Language Purity": detected_purity,
                 "Product Compatibility": calc_product_compat(a["channel_type"], product_eval),
                 "Risk Flags": calc_risk_flags(a["engagement_ratio"], a["inactive_days"], a["uploads_90d"], a["views_list"]),
             }
@@ -648,35 +709,35 @@ if st.session_state["mode"] == "evaluate":
             progress.empty()
             status_area.markdown("<div class='status-box'>✅ <b>Channel evaluation completed.</b></div>", unsafe_allow_html=True)
 
-            # TABLE 1 (Base)
+            # TABLE 1
             st.markdown('<div class="content-box">', unsafe_allow_html=True)
             st.subheader("Table 1 — Base Channel Metrics")
-            base_cols = ["Channel", "Type", "Subscribers", "Avg Views", "Engagement", "Channel URL"]
+            base_cols = ["Channel", "Type", "Subscribers", "Avg Views", "Avg Likes", "Avg Comments", "Engagement", "Channel URL"]
             st.dataframe(df_eval[base_cols], use_container_width=True, hide_index=True)
             st.markdown("</div>", unsafe_allow_html=True)
 
-            # TABLE 2 (Tier 1)
+            # TABLE 2
             st.markdown('<div class="content-box">', unsafe_allow_html=True)
             st.subheader("Table 2 — Tier 1")
             t1_cols = ["Channel", "Type", "Fit Score", "Sponsorship Readiness", "Cost Efficiency"]
             st.dataframe(df_eval[t1_cols], use_container_width=True, hide_index=True)
             st.markdown("</div>", unsafe_allow_html=True)
 
-            # TABLE 3 (Tier 2)
+            # TABLE 3
             st.markdown('<div class="content-box">', unsafe_allow_html=True)
             st.subheader("Table 3 — Tier 2")
             t2_cols = ["Channel", "Type", "Growth Momentum", "Sponsor Saturation", "Audience Trust"]
             st.dataframe(df_eval[t2_cols], use_container_width=True, hide_index=True)
             st.markdown("</div>", unsafe_allow_html=True)
 
-            # TABLE 4 (Tier 3)
+            # TABLE 4
             st.markdown('<div class="content-box">', unsafe_allow_html=True)
             st.subheader("Table 4 — Tier 3")
             t3_cols = ["Channel", "Type", "Language Purity", "Product Compatibility", "Risk Flags"]
             st.dataframe(df_eval[t3_cols], use_container_width=True, hide_index=True)
             st.markdown("</div>", unsafe_allow_html=True)
 
-            # Optional: show recent titles
+            # Optional: recent titles
             st.markdown('<div class="content-box">', unsafe_allow_html=True)
             st.subheader("📺 Recent Video Titles (Last 10)")
             for t in a["video_titles"]:
