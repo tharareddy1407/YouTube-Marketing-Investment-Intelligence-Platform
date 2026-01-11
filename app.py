@@ -206,7 +206,7 @@ st.markdown("</div>", unsafe_allow_html=True)
 status_area = st.empty()
 
 if st.session_state.get("mode") is not None:
-    _, _, col = st.columns([6, 6, 2])
+    col, _ = st.columns([2, 10])
     with col:
         if st.button("⬅️ Home"):
             st.session_state["mode"] = None
