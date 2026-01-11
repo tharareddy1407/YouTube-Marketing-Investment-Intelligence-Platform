@@ -401,15 +401,8 @@ def detect_dominant_script_purity(video_titles: List[str]) -> str:
         if not matched_any:
             latin_count += 1
 
-    best_name = "Latin"
-    best_count = latin_count
-    for name, c in counts.items():
-        if c > best_count:
-            best_name = name
-            best_count = c
-
     purity = int(round((best_count / total) * 100))
-    return f"{purity}% ({best_name})"
+    return f"{purity}%"
 
 # ==================================================
 # YouTube API
