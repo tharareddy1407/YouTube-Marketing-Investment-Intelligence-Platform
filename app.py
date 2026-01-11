@@ -19,21 +19,26 @@ st.set_page_config(
 )
 
 # ==================================================
-# GLOBAL CSS (hide Streamlit chrome + improve UI)
+# CSS: Hide Streamlit chrome + remove top white blocks + UI styling
 # ==================================================
 st.markdown(
     """
 <style>
-/* Hide Streamlit chrome that shows as white blocks */
-header[data-testid="stHeader"] { display: none; }
-div[data-testid="stToolbar"] { display: none; }
-div[data-testid="stDecoration"] { display: none; }
-footer { visibility: hidden; }
+/* --- Hide Streamlit UI chrome --- */
+header[data-testid="stHeader"] { display: none !important; }
+div[data-testid="stToolbar"] { display: none !important; }
+div[data-testid="stDecoration"] { display: none !important; }
+footer { visibility: hidden !important; }
 
-/* Reduce top padding */
-.block-container { padding-top: 1rem !important; }
+/* --- Remove/Hide the extra top containers that appear as white rounded bars --- */
+div[data-testid="stAppViewContainer"] > .main > div:first-child { display: none !important; }
+div[data-testid="stMainBlockContainer"] > div:first-child { display: none !important; }
 
-/* Card UI */
+/* --- Remove extra padding that makes the top bar visible --- */
+.block-container { padding-top: 0.8rem !important; }
+div[data-testid="stAppViewContainer"] .main { padding-top: 0 !important; }
+
+/* --- Background-friendly cards --- */
 .content-box {
     background: rgba(255, 255, 255, 0.965);
     padding: 1.8rem;
@@ -53,11 +58,11 @@ footer { visibility: hidden; }
 h1, h2, h3 { color: #0f172a; font-weight: 900; }
 p, span, div, label { color: #1f2937; font-size: 1rem; }
 
-/* Make buttons bigger and nicer */
-.stButton>button {
-    border-radius: 14px;
-    padding: 0.8rem 1rem;
-    font-weight: 700;
+/* Make buttons look nicer */
+.stButton > button {
+    border-radius: 14px !important;
+    padding: 0.8rem 1rem !important;
+    font-weight: 750 !important;
 }
 </style>
 """,
@@ -110,7 +115,7 @@ COUNTRY_LANGUAGE_MAP = {
     "Singapore": ["English", "Mandarin", "Malay", "Tamil"],
 }
 
-# YouTube "regionCode" expects ISO 3166-1 alpha-2
+# YouTube regionCode (ISO 3166-1 alpha-2)
 COUNTRY_REGION_CODE = {
     "USA": "US",
     "India": "IN",
@@ -153,32 +158,25 @@ def engagement_label(engagement_ratio: float) -> str:
     return "🔴 Low"
 
 def infer_channel_type(title: str, desc: str, recent_titles: list[str]) -> str:
-    """
-    Lightweight heuristic classification using keywords.
-    (No extra APIs; fast and Render-friendly.)
-    """
     text = " ".join([title or "", desc or ""] + (recent_titles or [])).lower()
-
     taxonomy = [
-        ("Tech & Gadgets", ["tech", "iphone", "android", "smartphone", "mobile", "laptop", "pc", "gaming", "review", "unboxing", "gadget"]),
-        ("Cooking & Food", ["recipe", "cooking", "kitchen", "chef", "baking", "food", "curry", "dosa", "biryani", "meal prep"]),
-        ("Beauty & Fashion", ["makeup", "skincare", "beauty", "fashion", "outfit", "haul", "styling"]),
-        ("Fitness & Health", ["fitness", "workout", "gym", "yoga", "health", "diet", "weight loss"]),
-        ("Education", ["tutorial", "learn", "course", "lecture", "explained", "how to", "tips", "training"]),
-        ("Finance & Business", ["finance", "stock", "invest", "trading", "business", "startup", "marketing", "money"]),
-        ("Entertainment", ["comedy", "movie", "cinema", "trailer", "song", "music", "funny", "prank"]),
-        ("Travel", ["travel", "vlog", "trip", "tour", "flight", "hotel", "visit"]),
+        ("Tech & Gadgets", ["tech", "iphone", "android", "smartphone", "mobile", "laptop", "pc", "review", "unboxing", "gadget"]),
+        ("Cooking & Food", ["recipe", "cooking", "kitchen", "chef", "baking", "food", "meal prep", "dosa", "biryani"]),
+        ("Beauty & Fashion", ["makeup", "skincare", "beauty", "fashion", "outfit", "haul"]),
+        ("Fitness & Health", ["fitness", "workout", "gym", "yoga", "health", "diet"]),
+        ("Education", ["tutorial", "learn", "course", "lecture", "explained", "how to", "tips"]),
+        ("Finance & Business", ["finance", "stock", "invest", "trading", "business", "marketing", "money"]),
+        ("Entertainment", ["comedy", "movie", "cinema", "music", "funny", "prank"]),
+        ("Travel", ["travel", "vlog", "trip", "tour", "hotel"]),
         ("Gaming", ["gaming", "gameplay", "walkthrough", "ps5", "xbox", "minecraft", "fortnite"]),
-        ("News & Politics", ["news", "politics", "breaking", "debate", "election"]),
+        ("News & Politics", ["news", "politics", "breaking", "debate"]),
     ]
-
-    best = ("General", 0)
+    best_label, best_score = "General", 0
     for label, kws in taxonomy:
         score = sum(1 for k in kws if k in text)
-        if score > best[1]:
-            best = (label, score)
-
-    return best[0]
+        if score > best_score:
+            best_label, best_score = label, score
+    return best_label
 
 def extract_channel_id_or_handle(text: str):
     if not text:
@@ -214,7 +212,6 @@ def resolve_channel_id(youtube_client, channel_input: str):
         type="channel",
         maxResults=1
     ).execute()
-
     items = resp.get("items", [])
     if not items:
         return None
@@ -306,7 +303,7 @@ def fetch_channel_analysis(channel_id: str):
     }
 
 # ==================================================
-# Session State: Landing page mode picker
+# Session State: Landing mode
 # ==================================================
 if "mode" not in st.session_state:
     st.session_state["mode"] = None  # None => landing
@@ -323,7 +320,7 @@ st.markdown('</div>', unsafe_allow_html=True)
 status_area = st.empty()
 
 # ==================================================
-# LANDING: ONLY TWO OPTIONS CENTERED
+# Landing Page: Two options in middle
 # ==================================================
 if st.session_state["mode"] is None:
     st.markdown('<div class="content-box">', unsafe_allow_html=True)
@@ -340,8 +337,8 @@ if st.session_state["mode"] is None:
     st.stop()
 
 # ==================================================
-# MODE 1: Discover Channels
-# country -> state -> language -> marketing product -> min subs -> results
+# Discover Channels
+# Inputs: country -> state -> language -> product -> min subs
 # ==================================================
 if st.session_state["mode"] == "discover":
     st.markdown('<div class="content-box">', unsafe_allow_html=True)
@@ -372,13 +369,11 @@ if st.session_state["mode"] == "discover":
             "<div class='status-box'>🔎 <b>Checking with YouTube...</b> Results are on the way ✅</div>",
             unsafe_allow_html=True
         )
-
         progress = st.progress(0)
         progress.progress(15)
-        time.sleep(0.12)
+        time.sleep(0.1)
 
         try:
-            # Search channels by product keyword
             search_response = youtube.search().list(
                 q=product.strip(),
                 part="snippet",
@@ -395,23 +390,22 @@ if st.session_state["mode"] == "discover":
                 st.warning("No channels found. Try a broader product keyword.")
                 st.stop()
 
-            # Batch fetch channels + analyze each
             rows = []
             for cid in channel_ids:
-                analysis = fetch_channel_analysis(cid)
-                if not analysis:
+                a = fetch_channel_analysis(cid)
+                if not a:
                     continue
-                if analysis["subs"] < min_subs:
+                if a["subs"] < min_subs:
                     continue
 
                 rows.append({
-                    "Channel": analysis["title"],
-                    "Type": analysis["channel_type"],
-                    "Subscribers": analysis["subs"],
-                    "Avg Views (Last 10)": analysis["avg_views"],
-                    "Engagement": f"{analysis['engagement_label']} ({analysis['engagement_ratio']:.3f})",
-                    "Total Views": analysis["total_views"],
-                    "Channel URL": analysis["url"],
+                    "Channel": a["title"],
+                    "Type": a["channel_type"],
+                    "Subscribers": a["subs"],
+                    "Avg Views (Last 10)": a["avg_views"],
+                    "Engagement": f"{a['engagement_label']} ({a['engagement_ratio']:.3f})",
+                    "Total Views": a["total_views"],
+                    "Channel URL": a["url"],
                 })
 
             progress.progress(90)
@@ -425,7 +419,7 @@ if st.session_state["mode"] == "discover":
             df = pd.DataFrame(rows).sort_values("Subscribers", ascending=False).head(20)
 
             progress.progress(100)
-            time.sleep(0.08)
+            time.sleep(0.06)
             progress.empty()
 
             status_area.markdown(
@@ -458,9 +452,9 @@ if st.session_state["mode"] == "discover":
             st.error(f"Something went wrong while calling YouTube API: {e}")
 
 # ==================================================
-# MODE 2: Evaluate a Channel
-# ONLY ask: Channel Name or URL
-# Show: engagement score + type of channel + stats
+# Evaluate a Channel
+# Input: Channel Name or URL
+# Output: engagement score + channel type + stats
 # ==================================================
 if st.session_state["mode"] == "evaluate":
     st.markdown('<div class="content-box">', unsafe_allow_html=True)
@@ -481,10 +475,9 @@ if st.session_state["mode"] == "evaluate":
             "<div class='status-box'>🔎 <b>Checking this channel with YouTube...</b> Results are on the way ✅</div>",
             unsafe_allow_html=True
         )
-
         progress = st.progress(0)
         progress.progress(20)
-        time.sleep(0.12)
+        time.sleep(0.1)
 
         try:
             channel_id = resolve_channel_id(youtube, channel_input)
@@ -496,15 +489,15 @@ if st.session_state["mode"] == "evaluate":
 
             progress.progress(55)
 
-            analysis = fetch_channel_analysis(channel_id)
-            if not analysis:
+            a = fetch_channel_analysis(channel_id)
+            if not a:
                 progress.empty()
                 status_area.empty()
                 st.error("Could not fetch channel details. Try again.")
                 st.stop()
 
             progress.progress(100)
-            time.sleep(0.08)
+            time.sleep(0.06)
             progress.empty()
 
             status_area.markdown(
@@ -516,26 +509,25 @@ if st.session_state["mode"] == "evaluate":
             st.subheader("📌 Channel Summary")
 
             c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Subscribers", f"{analysis['subs']:,}")
-            c2.metric("Avg Views (Last 10)", f"{analysis['avg_views']:,}")
-            c3.metric("Engagement Score", f"{analysis['engagement_ratio']:.3f}")
-            c4.metric("Engagement Level", analysis["engagement_label"])
+            c1.metric("Subscribers", f"{a['subs']:,}")
+            c2.metric("Avg Views (Last 10)", f"{a['avg_views']:,}")
+            c3.metric("Engagement Score", f"{a['engagement_ratio']:.3f}")
+            c4.metric("Engagement Level", a["engagement_label"])
 
-            st.write(f"**Channel Name:** {analysis['title']}")
-            st.write(f"**Channel Type:** {analysis['channel_type']}")
-            st.write(f"**Total Views:** {analysis['total_views']:,}")
-            st.write(f"**Total Videos:** {analysis['video_count']:,}")
-            st.write(f"**Uploads (Last 90 days):** {analysis['uploads_90d']}")
-            st.write(f"**Last Upload (days ago):** {analysis['inactive_days']}")
+            st.write(f"**Channel Name:** {a['title']}")
+            st.write(f"**Channel Type:** {a['channel_type']}")
+            st.write(f"**Total Views:** {a['total_views']:,}")
+            st.write(f"**Total Videos:** {a['video_count']:,}")
+            st.write(f"**Uploads (Last 90 days):** {a['uploads_90d']}")
+            st.write(f"**Last Upload (days ago):** {a['inactive_days']}")
 
             st.write("**Channel URL:**")
-            st.write(analysis["url"])
-
+            st.write(a["url"])
             st.markdown('</div>', unsafe_allow_html=True)
 
             st.markdown('<div class="content-box">', unsafe_allow_html=True)
             st.subheader("📺 Recent Video Titles (Last 10)")
-            for t in analysis["video_titles"]:
+            for t in a["video_titles"]:
                 if t.strip():
                     st.write(f"• {t}")
             st.markdown('</div>', unsafe_allow_html=True)
