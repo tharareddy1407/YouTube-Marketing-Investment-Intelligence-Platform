@@ -33,7 +33,7 @@ def set_local_background(image_path: str):
         <style>
         .stApp {{
           background-image:
-            linear-gradient(rgba(245,247,255,0.93), rgba(245,247,255,0.93)),
+            linear-gradient(rgba(255,255,255,0.92), rgba(255,255,255,0.92)),
             url("data:image/{ext};base64,{encoded}");
           background-size: cover;
           background-position: center;
@@ -71,8 +71,8 @@ LANG_TO_YT_CODE = {
 
 # Unicode script ranges (for strict language filtering in Discover mode)
 LANG_UNICODE_RANGES = {
-    "Hindi": r"[\u0900-\u097F]",        # Devanagari
-    "Marathi": r"[\u0900-\u097F]",      # Devanagari
+    "Hindi": r"[\u0900-\u097F]",
+    "Marathi": r"[\u0900-\u097F]",
     "Telugu": r"[\u0C00-\u0C7F]",
     "Tamil": r"[\u0B80-\u0BFF]",
     "Kannada": r"[\u0C80-\u0CFF]",
@@ -206,7 +206,7 @@ PRODUCT_SYNONYMS = {
 }
 
 # ==================================================
-# Helper functions
+# Helpers
 # ==================================================
 def safe_int(val, default=0):
     try:
@@ -239,12 +239,9 @@ def engagement_label(r: float) -> str:
 def channel_matches_language(video_titles: List[str], language: str) -> bool:
     titles_text = " ".join(video_titles or [])
     pattern = LANG_UNICODE_RANGES.get(language)
-
-    # Strict script match where possible
     if pattern:
         return bool(re.search(pattern, titles_text))
 
-    # Latin-script languages: best-effort heuristics
     t = f" {titles_text.lower()} "
     if language == "Spanish":
         return (any(w in t for w in [" el ", " la ", " de ", " y ", " que ", " para ", " con "])
@@ -266,9 +263,6 @@ def language_purity_percent(video_titles: List[str], language: str) -> int:
     return int(round((hits / len(video_titles)) * 100))
 
 def infer_channel_type(title: str, desc: str, recent_titles: List[str]) -> str:
-    """
-    Lightweight classifier for channel type based on content text.
-    """
     text = " ".join([title or "", desc or ""] + (recent_titles or [])).lower()
     taxonomy = [
         ("Tech & Gadgets", ["tech","iphone","android","smartphone","mobile","laptop","review","unboxing","gadget","watch","smartwatch"]),
@@ -328,18 +322,13 @@ def resolve_channel_id(youtube_client, channel_input: str):
     return items[0]["snippet"]["channelId"]
 
 # ==================================================
-# Product typing + investment verdict logic
+# Product typing + verdict
 # ==================================================
 def detect_type_from_text(text: str) -> str:
-    """
-    Detect best matching type based on keyword hits.
-    Returns one of TYPE_KEYWORDS keys or 'General'.
-    """
     t = (text or "").lower().strip()
     if not t:
         return "General"
 
-    # synonym boost
     for base, syns in PRODUCT_SYNONYMS.items():
         if any(s in t for s in syns):
             t += f" {base}"
@@ -354,43 +343,34 @@ def detect_type_from_text(text: str) -> str:
         if score > best_score:
             best_score = score
             best_type = type_name
-
     return best_type if best_score > 0 else "General"
 
 def investment_verdict_simple(channel_type: str, product_text: str, fit_score: int, engagement_ratio: float) -> Tuple[str, str]:
-    """
-    Returns (verdict_label, reason)
-    verdict_label: '🟢 Recommended' | '🟡 Maybe' | '🔴 Not Recommended'
-    """
     product_type = detect_type_from_text(product_text)
     p = (product_text or "").lower()
 
-    # Category match => never harsh reject only due to low overlap
     if product_type != "General" and channel_type == product_type:
         if fit_score >= 55 or engagement_ratio >= 0.05:
             return "🟢 Recommended", f"Product type **{product_type}** matches channel type **{channel_type}**."
         return "🟡 Maybe", "Type matches, but keyword Fit Score is low. Try a small pilot campaign."
 
-    # If product type is unclear
     if product_type == "General":
         if fit_score >= 60:
-            return "🟡 Maybe", "Product type is unclear, but Fit Score is decent. Use a more specific keyword to improve accuracy."
-        return "🔴 Not Recommended", "Product keyword is too generic and Fit Score is low. Use a more specific product name."
+            return "🟡 Maybe", "Product type is unclear, but Fit Score is decent. Use a more specific keyword."
+        return "🔴 Not Recommended", "Product keyword is too generic and Fit Score is low."
 
-    # Explicit mismatch examples (cake on tech => reject, but kitchen gadgets on tech => maybe)
     if channel_type == "Tech & Gadgets" and product_type == "Cooking & Food":
         kitchen_gadget_terms = ["air fryer","mixer","grinder","oven","cookware","pan","pot","kitchen gadget","kitchen","blender"]
         if any(k in p for k in kitchen_gadget_terms):
-            return "🟡 Maybe", "Tech channels can work for **kitchen gadgets** (review/unboxing angle). Consider a test sponsorship."
-        return "🔴 Not Recommended", "Food items like **cake** usually don’t convert well on tech-focused audiences."
+            return "🟡 Maybe", "Tech channels can work for **kitchen gadgets** (review/unboxing angle)."
+        return "🔴 Not Recommended", "Food items like **cake** usually don’t convert well on tech audiences."
 
-    # Default mismatch
     if fit_score >= 70 and engagement_ratio >= 0.05:
-        return "🟡 Maybe", f"Different categories (**{product_type}** vs **{channel_type}**) but strong Fit Score + engagement suggests it may still work."
+        return "🟡 Maybe", f"Different categories (**{product_type}** vs **{channel_type}**) but strong Fit Score + engagement suggests it may work."
     return "🔴 Not Recommended", f"Mismatch: product type **{product_type}** vs channel type **{channel_type}**."
 
 # ==================================================
-# Evaluate-mode language purity (auto-detect dominant script)
+# Script purity auto-detection (Evaluate)
 # ==================================================
 SCRIPT_BUCKETS: List[Tuple[str, str]] = [
     ("Telugu", r"[\u0C00-\u0C7F]"),
@@ -442,10 +422,6 @@ if not API_KEY:
 youtube = build("youtube", "v3", developerKey=API_KEY)
 
 def fetch_channel_analysis(channel_id: str):
-    """
-    Returns channel stats + last 10 titles + aligned view/like/comment counts.
-    Like/comment counts may be missing -> 0.
-    """
     ch_resp = youtube.channels().list(part="snippet,statistics,contentDetails", id=channel_id).execute()
     items = ch_resp.get("items", [])
     if not items:
@@ -460,7 +436,6 @@ def fetch_channel_analysis(channel_id: str):
     desc = snippet.get("description", "")
     subs = safe_int(stats.get("subscriberCount", 0))
     total_views = safe_int(stats.get("viewCount", 0))
-    video_count = safe_int(stats.get("videoCount", 0))
 
     uploads_id = cd.get("relatedPlaylists", {}).get("uploads")
     if not uploads_id:
@@ -489,8 +464,8 @@ def fetch_channel_analysis(channel_id: str):
         vid = v.get("id")
         s = v.get("statistics", {}) or {}
         views_map[vid] = safe_int(s.get("viewCount", 0))
-        likes_map[vid] = safe_int(s.get("likeCount", 0))       # may be hidden
-        comments_map[vid] = safe_int(s.get("commentCount", 0)) # may be hidden
+        likes_map[vid] = safe_int(s.get("likeCount", 0))
+        comments_map[vid] = safe_int(s.get("commentCount", 0))
 
     views_list = [views_map.get(vid, 0) for vid in video_ids]
     likes_list = [likes_map.get(vid, 0) for vid in video_ids]
@@ -511,7 +486,6 @@ def fetch_channel_analysis(channel_id: str):
         "desc": desc,
         "subs": subs,
         "total_views": total_views,
-        "video_count": video_count,
         "avg_views": avg_views,
         "avg_likes": avg_likes,
         "avg_comments": avg_comments,
@@ -526,7 +500,7 @@ def fetch_channel_analysis(channel_id: str):
     }
 
 # ==================================================
-# Insights (Tier 1/2/3)
+# Insights
 # ==================================================
 SPONSOR_WORDS = ["sponsored", "ad", "paid partnership", "promo", "promotion", "brought to you by", "partnered with"]
 
@@ -617,7 +591,7 @@ def calc_risk_flags(eng_ratio: float, inactive_days: int, uploads_90d: int, view
     return "✅ None" if not flags else "⚠️ " + "; ".join(flags)
 
 # ==================================================
-# Glossary + About
+# Glossary (used on results pages)
 # ==================================================
 def render_glossary():
     with st.expander("ℹ️ Metrics Glossary (What each insight means)"):
@@ -654,14 +628,6 @@ def render_glossary():
 - Final recommendation based on product type vs channel type + Fit Score + engagement.
 """)
 
-def render_about():
-    with st.expander("About this project"):
-        st.write(
-            "Built by Thara Reddy Kankanala — Data & Analytics Engineer. "
-            "This project explores how AI-assisted analytics can help businesses "
-            "make better marketing investment decisions on YouTube."
-        )
-
 # ==================================================
 # Session state
 # ==================================================
@@ -677,8 +643,6 @@ st.write("Choose a mode below to continue.")
 st.markdown("<div class='small-note'>⚠️ Render free tier may take 30–60 seconds on first load.</div>", unsafe_allow_html=True)
 st.markdown("</div>", unsafe_allow_html=True)
 
-render_about()  # ✅ Add AI-assisted "About this project" expander globally
-
 status_area = st.empty()
 
 # Back to Home (top-left), only when not landing
@@ -690,9 +654,17 @@ if st.session_state.get("mode") is not None:
             st.rerun()
 
 # ==================================================
-# Landing
+# HOME PAGE (only here we show "About this project")
 # ==================================================
 if st.session_state["mode"] is None:
+    # About only on home
+    with st.expander("About this project"):
+        st.write(
+            "Built by Thara Reddy Kankanala — Data & Analytics Engineer. "
+            "This project explores how AI-assisted analytics can help businesses "
+            "make better marketing investment decisions on YouTube."
+        )
+
     st.markdown('<div class="content-box">', unsafe_allow_html=True)
     _, mid, _ = st.columns([1, 2, 1])
     with mid:
@@ -710,11 +682,6 @@ if st.session_state["mode"] is None:
 
 # ==================================================
 # DISCOVER MODE
-# Tables:
-# 1) Channel, Type, Subscribers, Avg Views, Avg Likes, Avg Comments, Engagement, URL
-# 2) Channel, Type, Fit Score, Sponsorship Readiness, Cost Efficiency
-# 3) Channel, Type, Growth Momentum, Sponsor Saturation, Audience Trust
-# 4) Channel, Type, Language Purity, Product Compatibility, Risk Flags
 # ==================================================
 if st.session_state["mode"] == "discover":
     st.markdown('<div class="content-box">', unsafe_allow_html=True)
@@ -770,11 +737,8 @@ if st.session_state["mode"] == "discover":
                 a = fetch_channel_analysis(cid)
                 if not a:
                     continue
-
                 if a["subs"] < min_subs:
                     continue
-
-                # Enforce selected-language channels only
                 if not channel_matches_language(a["video_titles"], language):
                     continue
 
@@ -787,10 +751,9 @@ if st.session_state["mode"] == "discover":
                 compat = calc_product_compat(a["channel_type"], product)
                 risk = calc_risk_flags(a["engagement_ratio"], a["inactive_days"], a["uploads_90d"], a["views_list"])
 
-                eff_raw = a["avg_views"] / max(1.0, (a["subs"] / 1000.0))  # views per 1k subs (raw for normalization)
+                eff_raw = a["avg_views"] / max(1.0, (a["subs"] / 1000.0))
 
                 rows.append({
-                    # Table 1
                     "Channel": a["title"],
                     "Type": a["channel_type"],
                     "Subscribers": a["subs"],
@@ -800,17 +763,14 @@ if st.session_state["mode"] == "discover":
                     "Engagement": f"{a['engagement_label']} ({a['engagement_ratio']:.3f})",
                     "Channel URL": a["url"],
 
-                    # Table 2 (Tier 1)
                     "Fit Score": fit,
                     "Sponsorship Readiness": sponsor_ready,
                     "_eff_raw": eff_raw,
 
-                    # Table 3 (Tier 2)
                     "Growth Momentum": growth,
                     "Sponsor Saturation": sat,
                     "Audience Trust": trust,
 
-                    # Table 4 (Tier 3)
                     "Language Purity": purity,
                     "Product Compatibility": compat,
                     "Risk Flags": risk,
@@ -819,16 +779,13 @@ if st.session_state["mode"] == "discover":
             if not rows:
                 progress.empty()
                 status_area.empty()
-                st.warning("No channels matched your filters + selected language. Try lowering subscribers or changing product keyword.")
+                st.warning("No channels matched your filters + selected language.")
                 st.stop()
 
             df = pd.DataFrame(rows)
-
-            # Normalize cost efficiency as x vs median
             med = df["_eff_raw"].median() if df["_eff_raw"].notna().any() else 0
             df["Cost Efficiency"] = (df["_eff_raw"] / med).map(lambda x: f"{x:.1f}x") if med and med > 0 else "N/A"
             df.drop(columns=["_eff_raw"], inplace=True, errors="ignore")
-
             df = df.sort_values(["Subscribers"], ascending=[False]).head(20)
 
             progress.progress(100)
@@ -838,28 +795,28 @@ if st.session_state["mode"] == "discover":
 
             render_glossary()
 
-            # TABLE 1
+            # Table 1
             st.markdown('<div class="content-box">', unsafe_allow_html=True)
             st.subheader("Table 1 — Base Channel Metrics")
             base_cols = ["Channel", "Type", "Subscribers", "Avg Views", "Avg Likes", "Avg Comments", "Engagement", "Channel URL"]
             st.dataframe(df[base_cols], use_container_width=True, hide_index=True)
             st.markdown("</div>", unsafe_allow_html=True)
 
-            # TABLE 2
+            # Table 2
             st.markdown('<div class="content-box">', unsafe_allow_html=True)
             st.subheader("Table 2 — Tier 1")
             t1_cols = ["Channel", "Type", "Fit Score", "Sponsorship Readiness", "Cost Efficiency"]
             st.dataframe(df[t1_cols], use_container_width=True, hide_index=True)
             st.markdown("</div>", unsafe_allow_html=True)
 
-            # TABLE 3
+            # Table 3
             st.markdown('<div class="content-box">', unsafe_allow_html=True)
             st.subheader("Table 3 — Tier 2")
             t2_cols = ["Channel", "Type", "Growth Momentum", "Sponsor Saturation", "Audience Trust"]
             st.dataframe(df[t2_cols], use_container_width=True, hide_index=True)
             st.markdown("</div>", unsafe_allow_html=True)
 
-            # TABLE 4
+            # Table 4
             st.markdown('<div class="content-box">', unsafe_allow_html=True)
             st.subheader("Table 4 — Tier 3")
             t3_cols = ["Channel", "Type", "Language Purity", "Product Compatibility", "Risk Flags"]
@@ -875,9 +832,6 @@ if st.session_state["mode"] == "discover":
 
 # ==================================================
 # EVALUATE MODE
-# - No country/language input
-# - Adds Investment Verdict (watch tech => recommended, cake tech => not recommended)
-# - Table 1 includes Avg Likes + Avg Comments
 # ==================================================
 if st.session_state["mode"] == "evaluate":
     st.markdown('<div class="content-box">', unsafe_allow_html=True)
@@ -894,7 +848,7 @@ if st.session_state["mode"] == "evaluate":
             st.warning("Please enter a channel name or URL.")
             st.stop()
         if not product_eval.strip():
-            st.warning("Please enter your marketing product (needed for Fit Score / Compatibility).")
+            st.warning("Please enter your marketing product.")
             st.stop()
 
         status_area.markdown("<div class='status-box'>🔎 <b>Checking this channel with YouTube...</b> Results are on the way ✅</div>", unsafe_allow_html=True)
@@ -907,25 +861,19 @@ if st.session_state["mode"] == "evaluate":
             if not channel_id:
                 progress.empty()
                 status_area.empty()
-                st.error("Could not find that channel. Try another name or paste the channel URL.")
+                st.error("Could not find that channel.")
                 st.stop()
 
             a = fetch_channel_analysis(channel_id)
             if not a:
                 progress.empty()
                 status_area.empty()
-                st.error("Could not fetch channel details. Try again.")
+                st.error("Could not fetch channel details.")
                 st.stop()
 
             fit = calc_fit_score(product_eval, a["title"], a["desc"], a["video_titles"])
-            verdict_label, verdict_reason = investment_verdict_simple(
-                channel_type=a["channel_type"],
-                product_text=product_eval,
-                fit_score=fit,
-                engagement_ratio=a["engagement_ratio"]
-            )
+            verdict_label, verdict_reason = investment_verdict_simple(a["channel_type"], product_eval, fit, a["engagement_ratio"])
 
-            # Evaluate cost efficiency as raw (views per 1k subs)
             eff_raw = a["avg_views"] / max(1.0, (a["subs"] / 1000.0))
             cost_eff = f"{eff_raw:.1f} views/1k subs"
 
@@ -936,7 +884,6 @@ if st.session_state["mode"] == "evaluate":
             progress.empty()
             status_area.markdown("<div class='status-box'>✅ <b>Channel evaluation completed.</b></div>", unsafe_allow_html=True)
 
-            # Verdict card
             st.markdown(
                 f"""
                 <div class="verdict-box">
@@ -951,7 +898,6 @@ if st.session_state["mode"] == "evaluate":
             render_glossary()
 
             row = {
-                # Table 1
                 "Channel": a["title"],
                 "Type": a["channel_type"],
                 "Subscribers": a["subs"],
@@ -961,17 +907,14 @@ if st.session_state["mode"] == "evaluate":
                 "Engagement": f"{a['engagement_label']} ({a['engagement_ratio']:.3f})",
                 "Channel URL": a["url"],
 
-                # Table 2 (Tier 1)
                 "Fit Score": fit,
                 "Sponsorship Readiness": calc_sponsorship_readiness(a["engagement_ratio"], a["uploads_90d"], a["inactive_days"]),
                 "Cost Efficiency": cost_eff,
 
-                # Table 3 (Tier 2)
                 "Growth Momentum": calc_growth_momentum(a["views_list"]),
                 "Sponsor Saturation": calc_sponsor_saturation(a["video_titles"]),
                 "Audience Trust": calc_audience_trust(a["engagement_ratio"], a["views_list"]),
 
-                # Table 4 (Tier 3)
                 "Language Purity": detected_purity,
                 "Product Compatibility": calc_product_compat(a["channel_type"], product_eval),
                 "Risk Flags": calc_risk_flags(a["engagement_ratio"], a["inactive_days"], a["uploads_90d"], a["views_list"]),
@@ -979,40 +922,32 @@ if st.session_state["mode"] == "evaluate":
 
             df_eval = pd.DataFrame([row])
 
-            # TABLE 1
+            # Table 1
             st.markdown('<div class="content-box">', unsafe_allow_html=True)
             st.subheader("Table 1 — Base Channel Metrics")
             base_cols = ["Channel", "Type", "Subscribers", "Avg Views", "Avg Likes", "Avg Comments", "Engagement", "Channel URL"]
             st.dataframe(df_eval[base_cols], use_container_width=True, hide_index=True)
             st.markdown("</div>", unsafe_allow_html=True)
 
-            # TABLE 2
+            # Table 2
             st.markdown('<div class="content-box">', unsafe_allow_html=True)
             st.subheader("Table 2 — Tier 1")
             t1_cols = ["Channel", "Type", "Fit Score", "Sponsorship Readiness", "Cost Efficiency"]
             st.dataframe(df_eval[t1_cols], use_container_width=True, hide_index=True)
             st.markdown("</div>", unsafe_allow_html=True)
 
-            # TABLE 3
+            # Table 3
             st.markdown('<div class="content-box">', unsafe_allow_html=True)
             st.subheader("Table 3 — Tier 2")
             t2_cols = ["Channel", "Type", "Growth Momentum", "Sponsor Saturation", "Audience Trust"]
             st.dataframe(df_eval[t2_cols], use_container_width=True, hide_index=True)
             st.markdown("</div>", unsafe_allow_html=True)
 
-            # TABLE 4
+            # Table 4
             st.markdown('<div class="content-box">', unsafe_allow_html=True)
             st.subheader("Table 4 — Tier 3")
             t3_cols = ["Channel", "Type", "Language Purity", "Product Compatibility", "Risk Flags"]
             st.dataframe(df_eval[t3_cols], use_container_width=True, hide_index=True)
-            st.markdown("</div>", unsafe_allow_html=True)
-
-            # Optional: recent titles
-            st.markdown('<div class="content-box">', unsafe_allow_html=True)
-            st.subheader("📺 Recent Video Titles (Last 10)")
-            for t in a["video_titles"]:
-                if t.strip():
-                    st.write(f"• {t}")
             st.markdown("</div>", unsafe_allow_html=True)
 
             st.markdown('<div class="footer">Built by <b>Thara Reddy Kankanala</b> · AI-assisted decision intelligence</div>', unsafe_allow_html=True)
