@@ -23,23 +23,6 @@ st.set_page_config(
 # =========================
 st.markdown("""
 
-
-/* Remove the gray/white “pill blocks” (Streamlit layout wrappers) */
-div[data-testid="stVerticalBlock"] { background: transparent !important; }
-div[data-testid="stVerticalBlock"] > div { background: transparent !important; box-shadow: none !important; }
-section.main > div { background: transparent !important; }
-
-/* Reduce top padding */
-.block-container { padding-top: 0.8rem !important; }
-
-/* Cards */
-.content-box{
-  background: rgba(255,255,255,0.965);
-  padding: 1.8rem;
-  border-radius: 18px;
-  margin-bottom: 1.25rem;
-  box-shadow: 0 10px 30px rgba(0,0,0,0.10);
-}
 .status-box{
   background: rgba(255,255,255,0.94);
   border: 1px solid rgba(15,23,42,0.12);
