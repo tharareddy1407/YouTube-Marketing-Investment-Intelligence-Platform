@@ -10,30 +10,28 @@ import streamlit as st
 import pandas as pd
 from googleapiclient.discovery import build
 
-# ==================================================
-# Page Config (must be first Streamlit call)
-# ==================================================
+# =========================
+# Page config
+# =========================
 st.set_page_config(
     page_title="YouTube Marketing Investment Intelligence Platform",
     layout="wide",
 )
 
-# ==================================================
-# SAFE CSS (does NOT hide main content)
-# ==================================================
+# =========================
+# CSS (SAFE)
+# =========================
 st.markdown(
     """
 <style>
-/* Hide Streamlit chrome safely */
+/* Hide Streamlit chrome */
 header[data-testid="stHeader"] { display: none !important; }
 div[data-testid="stToolbar"] { display: none !important; }
 div[data-testid="stDecoration"] { display: none !important; }
 footer { visibility: hidden !important; }
 
-/* Remove extra top padding */
 .block-container { padding-top: 1.2rem !important; }
 
-/* Card styles */
 .content-box {
     background: rgba(255, 255, 255, 0.965);
     padding: 1.8rem;
@@ -53,7 +51,6 @@ footer { visibility: hidden !important; }
 h1, h2, h3 { color: #0f172a; font-weight: 900; }
 p, span, div, label { color: #1f2937; font-size: 1rem; }
 
-/* Buttons */
 .stButton > button {
     border-radius: 14px !important;
     padding: 0.8rem 1rem !important;
@@ -64,17 +61,15 @@ p, span, div, label { color: #1f2937; font-size: 1rem; }
     unsafe_allow_html=True,
 )
 
-# ==================================================
-# Background Image (Local file, Render-safe) + Light overlay
-# ==================================================
+# =========================
+# Background image
+# =========================
 def set_local_background(image_path: str):
     img_path = Path(image_path)
     if not img_path.exists():
         return
-
     encoded = base64.b64encode(img_path.read_bytes()).decode()
     ext = img_path.suffix.lower().replace(".", "") or "png"
-
     st.markdown(
         f"""
         <style>
@@ -94,9 +89,9 @@ def set_local_background(image_path: str):
 
 set_local_background("assets/background.png")
 
-# ==================================================
-# Country -> Language
-# ==================================================
+# =========================
+# Country -> language + region codes
+# =========================
 COUNTRY_LANGUAGE_MAP = {
     "USA": ["English", "Spanish"],
     "India": ["Hindi", "English", "Telugu", "Tamil", "Kannada", "Malayalam", "Marathi", "Bengali", "Gujarati", "Punjabi", "Urdu", "Odia"],
@@ -117,9 +112,9 @@ COUNTRY_REGION_CODE = {
     "Singapore": "SG",
 }
 
-# ==================================================
+# =========================
 # Helpers
-# ==================================================
+# =========================
 def safe_int(val, default=0):
     try:
         return int(val)
@@ -133,10 +128,10 @@ def days_ago(iso_date: str) -> int:
     except Exception:
         return 9999
 
-def engagement_label(engagement_ratio: float) -> str:
-    if engagement_ratio >= 0.15:
+def engagement_label(r: float) -> str:
+    if r >= 0.15:
         return "🟢 High"
-    if engagement_ratio >= 0.05:
+    if r >= 0.05:
         return "🟡 Average"
     return "🔴 Low"
 
@@ -201,12 +196,12 @@ def resolve_channel_id(youtube_client, channel_input: str):
         return None
     return items[0]["snippet"]["channelId"]
 
-# ==================================================
+# =========================
 # YouTube API
-# ==================================================
+# =========================
 API_KEY = os.getenv("YOUTUBE_API_KEY", "").strip()
 if not API_KEY:
-    st.error("❌ Missing YOUTUBE_API_KEY. Add it as an environment variable (local terminal or Render).")
+    st.error("❌ Missing YOUTUBE_API_KEY. Add it as an environment variable (Render → Environment).")
     st.stop()
 
 youtube = build("youtube", "v3", developerKey=API_KEY)
@@ -234,6 +229,7 @@ def fetch_channel_analysis(channel_id: str):
 
     vids_res = youtube.playlistItems().list(part="snippet", playlistId=uploads_id, maxResults=10).execute()
     video_ids, video_titles, published_days = [], [], []
+
     for it in vids_res.get("items", []):
         sn = it.get("snippet", {})
         video_titles.append(sn.get("title", ""))
@@ -258,6 +254,7 @@ def fetch_channel_analysis(channel_id: str):
     ch_type = infer_channel_type(title, desc, video_titles)
 
     return {
+        "channel_id": channel_id,
         "title": title,
         "desc": desc,
         "subs": subs,
@@ -271,18 +268,17 @@ def fetch_channel_analysis(channel_id: str):
         "engagement_label": engagement_label(float(engagement_ratio)),
         "channel_type": ch_type,
         "url": f"https://www.youtube.com/channel/{channel_id}",
-        "channel_id": channel_id,
     }
 
-# ==================================================
-# Session State
-# ==================================================
+# =========================
+# Session state
+# =========================
 if "mode" not in st.session_state:
-    st.session_state["mode"] = None  # landing
+    st.session_state["mode"] = None
 
-# ==================================================
+# =========================
 # Header
-# ==================================================
+# =========================
 st.markdown('<div class="content-box">', unsafe_allow_html=True)
 st.title("📺 YouTube Marketing Investment Intelligence Platform")
 st.write("Choose a mode below to continue.")
@@ -291,9 +287,9 @@ st.markdown("</div>", unsafe_allow_html=True)
 
 status_area = st.empty()
 
-# ==================================================
-# Landing (2 centered buttons)
-# ==================================================
+# =========================
+# Landing: 2 buttons
+# =========================
 if st.session_state["mode"] is None:
     st.markdown('<div class="content-box">', unsafe_allow_html=True)
     left, mid, right = st.columns([1, 2, 1])
@@ -308,9 +304,9 @@ if st.session_state["mode"] is None:
     st.markdown("</div>", unsafe_allow_html=True)
     st.stop()
 
-# ==================================================
-# Discover Channels flow
-# ==================================================
+# =========================
+# Discover Channels
+# =========================
 if st.session_state["mode"] == "discover":
     st.markdown('<div class="content-box">', unsafe_allow_html=True)
     st.subheader("🔎 Discover Channels")
@@ -335,9 +331,10 @@ if st.session_state["mode"] == "discover":
             st.stop()
 
         region_code = COUNTRY_REGION_CODE.get(country, "US")
+
         status_area.markdown("<div class='status-box'>🔎 <b>Checking with YouTube...</b> Results are on the way ✅</div>", unsafe_allow_html=True)
         progress = st.progress(0)
-        progress.progress(20)
+        progress.progress(25)
         time.sleep(0.08)
 
         try:
@@ -348,7 +345,7 @@ if st.session_state["mode"] == "discover":
                 maxResults=25,
                 regionCode=region_code
             ).execute()
-            progress.progress(55)
+            progress.progress(60)
 
             channel_ids = [item["snippet"]["channelId"] for item in search_response.get("items", [])]
             if not channel_ids:
@@ -409,9 +406,9 @@ if st.session_state["mode"] == "discover":
             status_area.empty()
             st.error(f"Something went wrong while calling YouTube API: {e}")
 
-# ==================================================
-# Evaluate Channel flow
-# ==================================================
+# =========================
+# Evaluate a Channel (engagement + type + stats)
+# =========================
 if st.session_state["mode"] == "evaluate":
     st.markdown('<div class="content-box">', unsafe_allow_html=True)
     st.subheader("✅ Evaluate a Channel")
@@ -426,7 +423,7 @@ if st.session_state["mode"] == "evaluate":
 
         status_area.markdown("<div class='status-box'>🔎 <b>Checking this channel with YouTube...</b> Results are on the way ✅</div>", unsafe_allow_html=True)
         progress = st.progress(0)
-        progress.progress(25)
+        progress.progress(30)
         time.sleep(0.08)
 
         try:
@@ -462,4 +459,21 @@ if st.session_state["mode"] == "evaluate":
             st.write(f"**Channel Name:** {a['title']}")
             st.write(f"**Channel Type:** {a['channel_type']}")
             st.write(f"**Total Views:** {a['total_views']:,}")
-            st.write(f"**Total Videos:** {a
+            st.write(f"**Total Videos:** {a['video_count']:,}")
+            st.write(f"**Uploads (Last 90 days):** {a['uploads_90d']}")
+            st.write(f"**Last Upload (days ago):** {a['inactive_days']}")
+            st.write("**Channel URL:**")
+            st.write(a["url"])
+            st.markdown("</div>", unsafe_allow_html=True)
+
+            st.markdown('<div class="content-box">', unsafe_allow_html=True)
+            st.subheader("📺 Recent Video Titles (Last 10)")
+            for t in a["video_titles"]:
+                if t.strip():
+                    st.write(f"• {t}")
+            st.markdown("</div>", unsafe_allow_html=True)
+
+        except Exception as e:
+            progress.empty()
+            status_area.empty()
+            st.error(f"Something went wrong while calling YouTube API: {e}")
