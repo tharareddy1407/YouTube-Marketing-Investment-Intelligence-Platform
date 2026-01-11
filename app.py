@@ -24,7 +24,6 @@ st.set_page_config(
 def set_local_background(image_path: str):
     img_path = Path(image_path)
     if not img_path.exists():
-        st.warning(f"Background image not found at: {image_path}. App will load without background.")
         return
 
     encoded = base64.b64encode(img_path.read_bytes()).decode()
@@ -35,47 +34,43 @@ def set_local_background(image_path: str):
         <style>
         .stApp {{
             background-image:
-                linear-gradient(rgba(255,255,255,0.86), rgba(255,255,255,0.86)),
+                linear-gradient(rgba(255,255,255,0.88), rgba(255,255,255,0.88)),
                 url("data:image/{ext};base64,{encoded}");
             background-size: cover;
             background-position: center;
             background-repeat: no-repeat;
             background-attachment: fixed;
         }}
+
+        .content-box {{
+            background: rgba(255, 255, 255, 0.96);
+            padding: 1.7rem;
+            border-radius: 16px;
+            margin-bottom: 1.25rem;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.10);
+        }}
+
+        .status-box {{
+            background: rgba(255, 255, 255, 0.94);
+            border: 1px solid rgba(15, 23, 42, 0.12);
+            padding: 0.95rem 1.1rem;
+            border-radius: 14px;
+            margin: 0.8rem 0 1.2rem 0;
+        }}
+
+        .small-note {{
+            font-size: 0.9rem;
+            color: #334155;
+        }}
+
+        h1, h2, h3 {{ color: #0f172a; font-weight: 900; }}
+        p, span, div, label {{ color: #1f2937; font-size: 1rem; }}
         </style>
         """,
         unsafe_allow_html=True
     )
 
 set_local_background("assets/background.png")
-
-# ==================================================
-# UI Styling
-# ==================================================
-st.markdown("""
-<style>
-.content-box {
-    background: rgba(255, 255, 255, 0.96);
-    padding: 1.7rem;
-    border-radius: 16px;
-    margin-bottom: 1.25rem;
-    box-shadow: 0 10px 30px rgba(0,0,0,0.10);
-}
-.status-box {
-    background: rgba(255, 255, 255, 0.94);
-    border: 1px solid rgba(15, 23, 42, 0.12);
-    padding: 0.95rem 1.1rem;
-    border-radius: 14px;
-    margin: 0.8rem 0 1.2rem 0;
-}
-.small-note {
-    font-size: 0.9rem;
-    color: #334155;
-}
-h1, h2, h3 { color: #0f172a; font-weight: 900; }
-p, span, div, label { color: #1f2937; font-size: 1rem; }
-</style>
-""", unsafe_allow_html=True)
 
 # ==================================================
 # Country -> Language options (Dynamic)
@@ -93,7 +88,6 @@ COUNTRY_LANGUAGE_MAP = {
     "Singapore": ["English", "Mandarin", "Malay", "Tamil"],
 }
 
-# YouTube "regionCode" expects ISO 3166-1 alpha-2 (US, IN, GB, etc.)
 COUNTRY_REGION_CODE = {
     "USA": "US",
     "India": "IN",
@@ -129,7 +123,6 @@ def clamp(x, lo, hi):
     return max(lo, min(hi, x))
 
 def infer_geo_lang_confidence(country, language, channel_title, channel_desc, video_titles):
-    """Simple MVP heuristic (0–10)."""
     text = " ".join([channel_title or "", channel_desc or ""] + (video_titles or [])).lower()
     score = 0
 
@@ -146,14 +139,6 @@ def infer_geo_lang_confidence(country, language, channel_title, channel_desc, vi
     return clamp(score, 0, 10)
 
 def compute_fit_score(product_keywords, channel_text, video_titles, subs, avg_views, uploads_90d, inactive_days, geo_lang_conf):
-    """
-    0–100 score for "fit to invest"
-    - Relevance (0–45)
-    - Engagement (0–25)
-    - Activity (0–20)
-    - Geo/Lang confidence (0–10)
-    - Penalty (-15..0)
-    """
     kw_tokens = set()
     for kw in product_keywords:
         kw_tokens |= tokenize(kw)
@@ -163,22 +148,14 @@ def compute_fit_score(product_keywords, channel_text, video_titles, subs, avg_vi
     for t in video_titles:
         vid_tokens |= tokenize(t)
 
-    # Relevance (0–45)
-    hits_channel = len(kw_tokens & ch_tokens)
-    hits_videos = len(kw_tokens & vid_tokens)
-    relevance = clamp((hits_channel * 2) + (hits_videos * 1), 0, 45)
+    relevance = clamp((len(kw_tokens & ch_tokens) * 2) + (len(kw_tokens & vid_tokens) * 1), 0, 45)
 
-    # Engagement (0–25) using avg_views/subs ratio
     ratio = (avg_views / max(subs, 1)) if subs else 0.0
     engagement = 25 if ratio >= 0.30 else clamp((ratio / 0.30) * 25, 0, 25)
 
-    # Activity (0–20) uploads in last 90d
     activity = clamp((uploads_90d / 12.0) * 20, 0, 20)
-
-    # Geo/Lang (0–10)
     geo_lang = clamp(geo_lang_conf, 0, 10)
 
-    # Penalty
     penalty = 0
     if inactive_days > 120:
         penalty -= 10
@@ -190,7 +167,7 @@ def compute_fit_score(product_keywords, channel_text, video_titles, subs, avg_vi
 
 def investment_recommendation(score: float):
     if score >= 70:
-        return "✅ Recommended", "Strong fit for your product with healthy channel signals."
+        return "✅ Recommended", "Strong fit and healthy channel signals."
     if score >= 45:
         return "🟡 Maybe", "Some signals look good—review content match and engagement before investing."
     return "❌ Not Recommended", "Weak match or weak engagement/activity signals—consider other channels."
@@ -202,21 +179,15 @@ def extract_channel_id_or_handle(text: str):
     if t.startswith("http"):
         u = urlparse.urlparse(t)
         path = u.path.strip("/")
-
         if path.startswith("channel/"):
             parts = path.split("/")
             return (parts[1] if len(parts) > 1 else None), None
-
         if path.startswith("@"):
             return None, path
-
-        return None, None
-
     return None, None
 
 def resolve_channel_id(youtube_client, channel_input: str):
     ch_id, handle = extract_channel_id_or_handle(channel_input)
-
     if ch_id:
         return ch_id
 
@@ -235,7 +206,6 @@ def resolve_channel_id(youtube_client, channel_input: str):
         type="channel",
         maxResults=1
     ).execute()
-
     items = resp.get("items", [])
     if not items:
         return None
@@ -250,63 +220,6 @@ if not API_KEY:
     st.stop()
 
 youtube = build("youtube", "v3", developerKey=API_KEY)
-
-# ==================================================
-# Header
-# ==================================================
-st.markdown('<div class="content-box">', unsafe_allow_html=True)
-st.title("📺 YouTube Marketing Investment Intelligence Platform")
-st.write("Choose a mode, enter your country/state/language + product, then get channels or evaluate one channel.")
-st.markdown("<div class='small-note'>⚠️ Hosted on Render free tier. Cold start may take 30–60 seconds.</div>", unsafe_allow_html=True)
-st.markdown('</div>', unsafe_allow_html=True)
-
-status_area = st.empty()
-
-# ==================================================
-# Mode Selection (MAIN UI)
-# ==================================================
-st.markdown('<div class="content-box">', unsafe_allow_html=True)
-mode = st.radio("Select Mode", ["Discover Channels", "Evaluate a Channel"], horizontal=True)
-st.markdown('</div>', unsafe_allow_html=True)
-
-# ==================================================
-# Common Inputs (show only these fields)
-# ==================================================
-st.markdown('<div class="content-box">', unsafe_allow_html=True)
-col1, col2, col3 = st.columns([1.2, 1.2, 1.2])
-
-with col1:
-    country = st.selectbox("Country", list(COUNTRY_LANGUAGE_MAP.keys()), index=0)
-with col2:
-    state = st.text_input("State (optional)", placeholder="Ex: Texas / California / Telangana")
-with col3:
-    language = st.selectbox("Language", COUNTRY_LANGUAGE_MAP.get(country, ["English"]), index=0)
-
-product_input = st.text_area(
-    "Marketing Product / Keywords (comma-separated)",
-    value="phone, smartphone, mobile accessories" if mode == "Evaluate a Channel" else "kitchen gadgets, cookware, meal prep"
-)
-product_keywords = [k.strip() for k in product_input.split(",") if k.strip()]
-
-min_subs = st.number_input("Minimum Subscribers", min_value=0, value=100000, step=10000)
-st.markdown('</div>', unsafe_allow_html=True)
-
-# ==================================================
-# Mode-specific inputs (ONLY show what is needed)
-# ==================================================
-if mode == "Evaluate a Channel":
-    st.markdown('<div class="content-box">', unsafe_allow_html=True)
-    channel_input = st.text_input(
-        "Channel Name or URL",
-        placeholder="Ex: Marques Brownlee OR https://www.youtube.com/@mkbhd"
-    )
-    st.markdown('</div>', unsafe_allow_html=True)
-
-# ==================================================
-# Action button
-# ==================================================
-btn_label = "🚀 Find Channels" if mode == "Discover Channels" else "✅ Evaluate Channel"
-run = st.button(btn_label, type="primary")
 
 # ==================================================
 # Fetch channel analysis helper
@@ -330,8 +243,8 @@ def fetch_channel_analysis(channel_id: str):
     desc = snippet.get("description", "")
     subs = safe_int(stats.get("subscriberCount", 0))
     total_views = safe_int(stats.get("viewCount", 0))
-    uploads_id = cd.get("relatedPlaylists", {}).get("uploads")
 
+    uploads_id = cd.get("relatedPlaylists", {}).get("uploads")
     if not uploads_id:
         return None
 
@@ -376,27 +289,83 @@ def fetch_channel_analysis(channel_id: str):
     }
 
 # ==================================================
-# Run Logic
+# Session State
 # ==================================================
-if run:
-    if not product_keywords:
-        st.warning("Please enter your marketing product/keywords.")
-        st.stop()
+if "mode" not in st.session_state:
+    st.session_state["mode"] = None  # None -> landing page
 
-    region_code = COUNTRY_REGION_CODE.get(country, "US")
+# ==================================================
+# Header
+# ==================================================
+st.markdown('<div class="content-box">', unsafe_allow_html=True)
+st.title("📺 YouTube Marketing Investment Intelligence Platform")
+st.write("Select one option to continue.")
+st.markdown("<div class='small-note'>⚠️ Hosted on Render free tier. Cold start may take 30–60 seconds.</div>", unsafe_allow_html=True)
+st.markdown('</div>', unsafe_allow_html=True)
 
-    status_area.markdown(
-        "<div class='status-box'>🔎 <b>Checking with YouTube...</b> Results are on the way ✅</div>",
-        unsafe_allow_html=True
-    )
-    progress = st.progress(0)
-    progress.progress(15)
-    time.sleep(0.12)
+status_area = st.empty()
 
-    try:
-        if mode == "Discover Channels":
-            # Search channels by product keywords in selected country
-            query = " ".join(product_keywords[:6])
+# ==================================================
+# Landing Page: Two options in the middle
+# ==================================================
+if st.session_state["mode"] is None:
+    st.markdown('<div class="content-box">', unsafe_allow_html=True)
+    left, mid, right = st.columns([1, 2, 1])
+
+    with mid:
+        st.subheader("Choose Mode")
+        if st.button("🔎 Discover Channels", use_container_width=True):
+            st.session_state["mode"] = "discover"
+            st.rerun()
+
+        if st.button("✅ Evaluate a Channel", use_container_width=True):
+            st.session_state["mode"] = "evaluate"
+            st.rerun()
+
+    st.markdown('</div>', unsafe_allow_html=True)
+    st.stop()
+
+# ==================================================
+# Mode: Discover Channels (only these inputs)
+# ==================================================
+if st.session_state["mode"] == "discover":
+    st.markdown('<div class="content-box">', unsafe_allow_html=True)
+    st.subheader("🔎 Discover Channels")
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        country = st.selectbox("Country", list(COUNTRY_LANGUAGE_MAP.keys()), index=0)
+    with c2:
+        state = st.text_input("State", placeholder="Ex: Texas / California / Telangana")
+    with c3:
+        language = st.selectbox("Language", COUNTRY_LANGUAGE_MAP.get(country, ["English"]), index=0)
+
+    product_input = st.text_input("Marketing Product", placeholder="Ex: phone, kitchen gadgets, skincare")
+    min_subs = st.number_input("Minimum Subscribers", min_value=0, value=100000, step=10000)
+
+    run = st.button("🚀 Find Channels", type="primary")
+
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    if run:
+        if not product_input.strip():
+            st.warning("Please enter a marketing product.")
+            st.stop()
+
+        region_code = COUNTRY_REGION_CODE.get(country, "US")
+        product_keywords = [product_input.strip()]
+
+        status_area.markdown(
+            "<div class='status-box'>🔎 <b>Checking with YouTube...</b> Results are on the way ✅</div>",
+            unsafe_allow_html=True
+        )
+
+        progress = st.progress(0)
+        progress.progress(15)
+        time.sleep(0.12)
+
+        try:
+            query = product_input.strip()
 
             search_response = youtube.search().list(
                 q=query,
@@ -405,20 +374,20 @@ if run:
                 maxResults=25,
                 regionCode=region_code
             ).execute()
-            progress.progress(40)
+            progress.progress(45)
 
             channel_ids = [item["snippet"]["channelId"] for item in search_response.get("items", [])]
             if not channel_ids:
                 progress.empty()
                 status_area.empty()
-                st.warning("No channels found. Try broader keywords.")
+                st.warning("No channels found. Try a broader product keyword.")
                 st.stop()
 
             channels_response = youtube.channels().list(
                 part="snippet,statistics,contentDetails",
                 id=",".join(channel_ids)
             ).execute()
-            progress.progress(60)
+            progress.progress(65)
 
             rows = []
             for ch in channels_response.get("items", []):
@@ -427,7 +396,6 @@ if run:
                 if not analysis:
                     continue
 
-                # Filter by minimum subscribers only (as requested)
                 if analysis["subs"] < min_subs:
                     continue
 
@@ -455,34 +423,29 @@ if run:
                     "Channel URL": analysis["url"],
                 })
 
-            progress.progress(85)
+            progress.progress(90)
 
             if not rows:
                 progress.empty()
                 status_area.empty()
-                st.warning("No channels matched. Try reducing Minimum Subscribers or using broader keywords.")
+                st.warning("No channels matched. Try reducing Minimum Subscribers or changing product keyword.")
                 st.stop()
 
-            df = pd.DataFrame(rows)
-
-            # Top channels based on subscribers (as requested)
-            df = df.sort_values(["Subscribers", "Fit Score"], ascending=[False, False]).head(20)
+            df = pd.DataFrame(rows).sort_values("Subscribers", ascending=False).head(20)
 
             progress.progress(100)
             time.sleep(0.08)
             progress.empty()
 
             status_area.markdown(
-                "<div class='status-box'>✅ <b>Results are ready!</b> Top channels based on subscribers are below.</div>",
+                "<div class='status-box'>✅ <b>Results are ready!</b> Top channels by subscribers are below.</div>",
                 unsafe_allow_html=True
             )
 
             st.markdown('<div class="content-box">', unsafe_allow_html=True)
-            st.subheader("✅ Top Channels (by Subscribers)")
-
-            # Show only the values user entered + results
-            st.write(f"**Country:** {country}  |  **State:** {state or 'N/A'}  |  **Language:** {language}")
-            st.write(f"**Marketing Product:** {', '.join(product_keywords)}  |  **Min Subscribers:** {min_subs:,}")
+            st.subheader("✅ Results")
+            st.write(f"**Country:** {country} | **State:** {state} | **Language:** {language}")
+            st.write(f"**Marketing Product:** {product_input} | **Minimum Subscribers:** {min_subs:,}")
 
             st.dataframe(
                 df[["Channel", "Subscribers", "Total Views", "Avg Views (Last 10)", "Fit Score", "Channel URL"]],
@@ -493,19 +456,44 @@ if run:
             st.download_button(
                 "⬇️ Download CSV",
                 data=df.to_csv(index=False).encode("utf-8"),
-                file_name="youtube_channels_discover.csv",
+                file_name="discover_channels.csv",
                 mime="text/csv"
             )
             st.markdown('</div>', unsafe_allow_html=True)
 
-        else:
-            # Evaluate a specific channel
-            if not channel_input.strip():
-                progress.empty()
-                status_area.empty()
-                st.warning("Please enter a channel name or URL.")
-                st.stop()
+        except Exception as e:
+            progress.empty()
+            status_area.empty()
+            st.error(f"Something went wrong while calling YouTube API: {e}")
 
+# ==================================================
+# Mode: Evaluate a Channel (only this input)
+# ==================================================
+if st.session_state["mode"] == "evaluate":
+    st.markdown('<div class="content-box">', unsafe_allow_html=True)
+    st.subheader("✅ Evaluate a Channel")
+    channel_input = st.text_input(
+        "Channel Name or URL",
+        placeholder="Ex: Marques Brownlee OR https://www.youtube.com/@mkbhd"
+    )
+    run = st.button("✅ Evaluate Channel", type="primary")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    if run:
+        if not channel_input.strip():
+            st.warning("Please enter a channel name or URL.")
+            st.stop()
+
+        status_area.markdown(
+            "<div class='status-box'>🔎 <b>Checking this channel with YouTube...</b> Results are on the way ✅</div>",
+            unsafe_allow_html=True
+        )
+
+        progress = st.progress(0)
+        progress.progress(20)
+        time.sleep(0.12)
+
+        try:
             channel_id = resolve_channel_id(youtube, channel_input)
             if not channel_id:
                 progress.empty()
@@ -522,66 +510,26 @@ if run:
                 st.error("Could not fetch channel details. Try again.")
                 st.stop()
 
-            if analysis["subs"] < min_subs:
-                progress.empty()
-                status_area.empty()
-                st.warning(f"Channel has {analysis['subs']:,} subscribers, below your minimum {min_subs:,}.")
-                st.stop()
-
-            geo_lang_conf = infer_geo_lang_confidence(
-                country, language, analysis["title"], analysis["desc"], analysis["video_titles"]
-            )
-
-            score, relevance, engagement, activity, geo_lang, penalty, ratio = compute_fit_score(
-                product_keywords=product_keywords,
-                channel_text=f"{analysis['title']} {analysis['desc']}",
-                video_titles=analysis["video_titles"],
-                subs=analysis["subs"],
-                avg_views=analysis["avg_views"],
-                uploads_90d=analysis["uploads_90d"],
-                inactive_days=analysis["inactive_days"],
-                geo_lang_conf=geo_lang_conf
-            )
-
-            decision, explanation = investment_recommendation(score)
-
+            # Simple evaluation: Just show channel stats
             progress.progress(100)
             time.sleep(0.08)
             progress.empty()
 
             status_area.markdown(
-                "<div class='status-box'>✅ <b>Channel evaluation completed.</b></div>",
+                "<div class='status-box'>✅ <b>Channel details are ready!</b></div>",
                 unsafe_allow_html=True
             )
 
             st.markdown('<div class="content-box">', unsafe_allow_html=True)
-            st.subheader("📌 Investment Decision")
-
-            # Show only the values user entered + results (as requested)
-            st.write(f"**Country:** {country}  |  **State:** {state or 'N/A'}  |  **Language:** {language}")
-            st.write(f"**Marketing Product:** {', '.join(product_keywords)}  |  **Min Subscribers:** {min_subs:,}")
-
-            st.markdown(f"### {decision}")
-            st.write(explanation)
-
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Fit Score", f"{round(score, 1)}/100")
-            c2.metric("Subscribers", f"{analysis['subs']:,}")
-            c3.metric("Avg Views (Last 10)", f"{analysis['avg_views']:,}")
-            c4.metric("Engagement Ratio", f"{ratio:.3f}")
-
-            st.write("**Score breakdown**")
-            st.write(f"- Relevance: {relevance}/45")
-            st.write(f"- Engagement: {round(engagement, 1)}/25")
-            st.write(f"- Activity: {round(activity, 1)}/20")
-            st.write(f"- Geo/Lang Confidence: {geo_lang}/10")
-            st.write(f"- Penalty: {penalty}")
-
-            st.write("**Channel Link**")
-            st.write(analysis["url"])
+            st.subheader("📌 Channel Result")
+            st.write(f"**Channel:** {analysis['title']}")
+            st.write(f"**Subscribers:** {analysis['subs']:,}")
+            st.write(f"**Total Views:** {analysis['total_views']:,}")
+            st.write(f"**Avg Views (Last 10):** {analysis['avg_views']:,}")
+            st.write(f"**Channel URL:** {analysis['url']}")
             st.markdown('</div>', unsafe_allow_html=True)
 
-    except Exception as e:
-        progress.empty()
-        status_area.empty()
-        st.error(f"Something went wrong while calling YouTube API: {e}")
+        except Exception as e:
+            progress.empty()
+            status_area.empty()
+            st.error(f"Something went wrong while calling YouTube API: {e}")
