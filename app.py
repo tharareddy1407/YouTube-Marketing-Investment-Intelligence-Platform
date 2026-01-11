@@ -20,35 +20,6 @@ st.set_page_config(
 )
 
 # ==================================================
-# CSS
-# ==================================================
-st.markdown(
-    """
-<style>
-.content-box{
-  background: rgba(255,255,255,0.96);
-  padding: 22px;
-  border-radius: 18px;
-  box-shadow: 0 10px 30px rgba(0,0,0,0.10);
-  margin-bottom: 16px;
-}
-.status-box{
-  background: rgba(255,255,255,0.92);
-  border: 1px solid rgba(15,23,42,0.12);
-  padding: 12px 14px;
-  border-radius: 14px;
-  margin: 10px 0 12px 0;
-}
-.small-note{
-  color: #334155;
-  font-size: 0.92rem;
-}
-</style>
-""",
-    unsafe_allow_html=True,
-)
-
-# ==================================================
 # Background image (local -> base64)
 # ==================================================
 def set_local_background(image_path: str):
@@ -259,6 +230,9 @@ if not API_KEY:
 youtube = build("youtube", "v3", developerKey=API_KEY)
 
 def fetch_channel_analysis(channel_id: str):
+    """
+    Returns: channel stats + last 10 titles + aligned last 10 view counts
+    """
     ch_resp = youtube.channels().list(part="snippet,statistics,contentDetails", id=channel_id).execute()
     items = ch_resp.get("items", [])
     if not items:
@@ -273,6 +247,7 @@ def fetch_channel_analysis(channel_id: str):
     desc = snippet.get("description", "")
     subs = safe_int(stats.get("subscriberCount", 0))
     total_views = safe_int(stats.get("viewCount", 0))
+    video_count = safe_int(stats.get("videoCount", 0))
 
     uploads_id = cd.get("relatedPlaylists", {}).get("uploads")
     if not uploads_id:
@@ -309,6 +284,7 @@ def fetch_channel_analysis(channel_id: str):
         "desc": desc,
         "subs": subs,
         "total_views": total_views,
+        "video_count": video_count,
         "avg_views": avg_views,
         "inactive_days": inactive_days,
         "uploads_90d": uploads_90d,
@@ -451,7 +427,7 @@ if st.session_state["mode"] is None:
 
 # ==================================================
 # DISCOVER CHANNELS
-# - 4 separate tables exactly as requested
+# - 4 separate tables (base + tier1 + tier2 + tier3)
 # ==================================================
 if st.session_state["mode"] == "discover":
     st.markdown('<div class="content-box">', unsafe_allow_html=True)
@@ -515,7 +491,6 @@ if st.session_state["mode"] == "discover":
                 if not channel_matches_language(a["video_titles"], language):
                     continue
 
-                # Cost Efficiency normalized later
                 eff_raw = a["avg_views"] / max(1.0, (a["subs"] / 1000.0))
 
                 rows.append({
@@ -526,17 +501,14 @@ if st.session_state["mode"] == "discover":
                     "Engagement": f"{a['engagement_label']} ({a['engagement_ratio']:.3f})",
                     "Channel URL": a["url"],
 
-                    # Tier 1
                     "Fit Score": calc_fit_score(product, a["title"], a["desc"], a["video_titles"]),
                     "Sponsorship Readiness": calc_sponsorship_readiness(a["engagement_ratio"], a["uploads_90d"], a["inactive_days"]),
                     "_eff_raw": eff_raw,
 
-                    # Tier 2
                     "Growth Momentum": calc_growth_momentum(a["views_list"]),
                     "Sponsor Saturation": calc_sponsor_saturation(a["video_titles"]),
                     "Audience Trust": calc_audience_trust(a["engagement_ratio"], a["views_list"]),
 
-                    # Tier 3
                     "Language Purity": f"{language_purity_percent(a['video_titles'], language)}%",
                     "Product Compatibility": calc_product_compat(a["channel_type"], product),
                     "Risk Flags": calc_risk_flags(a["engagement_ratio"], a["inactive_days"], a["uploads_90d"], a["views_list"]),
@@ -550,15 +522,11 @@ if st.session_state["mode"] == "discover":
 
             df = pd.DataFrame(rows)
 
-            # Normalize cost efficiency into “x” vs median
+            # Normalize Cost Efficiency into “x” vs median
             med = df["_eff_raw"].median() if df["_eff_raw"].notna().any() else 0
-            if med and med > 0:
-                df["Cost Efficiency"] = (df["_eff_raw"] / med).map(lambda x: f"{x:.1f}x")
-            else:
-                df["Cost Efficiency"] = "N/A"
+            df["Cost Efficiency"] = (df["_eff_raw"] / med).map(lambda x: f"{x:.1f}x") if med and med > 0 else "N/A"
             df.drop(columns=["_eff_raw"], inplace=True, errors="ignore")
 
-            # Sort by subscribers
             df = df.sort_values(["Subscribers"], ascending=[False]).head(20)
 
             progress.progress(100)
@@ -566,68 +534,32 @@ if st.session_state["mode"] == "discover":
             progress.empty()
             status_area.markdown("<div class='status-box'>✅ <b>Results are ready!</b></div>", unsafe_allow_html=True)
 
-            # -----------------------------
             # TABLE 1 (Base)
-            # channel, type, subscribers, avg views, engagement, channel url
-            # -----------------------------
             st.markdown('<div class="content-box">', unsafe_allow_html=True)
             st.subheader("Table 1 — Base Channel Metrics")
             base_cols = ["Channel", "Type", "Subscribers", "Avg Views", "Engagement", "Channel URL"]
             st.dataframe(df[base_cols], use_container_width=True, hide_index=True)
-            st.download_button(
-                "⬇️ Download Table 1 CSV",
-                data=df[base_cols].to_csv(index=False).encode("utf-8"),
-                file_name="table1_base_metrics.csv",
-                mime="text/csv",
-            )
             st.markdown("</div>", unsafe_allow_html=True)
 
-            # -----------------------------
             # TABLE 2 (Tier 1)
-            # channel, type, fit score, sponsorship readiness, cost efficiency
-            # -----------------------------
             st.markdown('<div class="content-box">', unsafe_allow_html=True)
-            st.subheader("Table 2 — Tier 1 Insights")
+            st.subheader("Table 2 — Tier 1")
             t1_cols = ["Channel", "Type", "Fit Score", "Sponsorship Readiness", "Cost Efficiency"]
             st.dataframe(df[t1_cols], use_container_width=True, hide_index=True)
-            st.download_button(
-                "⬇️ Download Table 2 CSV",
-                data=df[t1_cols].to_csv(index=False).encode("utf-8"),
-                file_name="table2_tier1.csv",
-                mime="text/csv",
-            )
             st.markdown("</div>", unsafe_allow_html=True)
 
-            # -----------------------------
             # TABLE 3 (Tier 2)
-            # channel, type, growth momentum, sponsor saturation, audience trust
-            # -----------------------------
             st.markdown('<div class="content-box">', unsafe_allow_html=True)
-            st.subheader("Table 3 — Tier 2 Insights")
+            st.subheader("Table 3 — Tier 2")
             t2_cols = ["Channel", "Type", "Growth Momentum", "Sponsor Saturation", "Audience Trust"]
             st.dataframe(df[t2_cols], use_container_width=True, hide_index=True)
-            st.download_button(
-                "⬇️ Download Table 3 CSV",
-                data=df[t2_cols].to_csv(index=False).encode("utf-8"),
-                file_name="table3_tier2.csv",
-                mime="text/csv",
-            )
             st.markdown("</div>", unsafe_allow_html=True)
 
-            # -----------------------------
             # TABLE 4 (Tier 3)
-            # channel, type, language purity, product compatibility, risk flags
-            # -----------------------------
             st.markdown('<div class="content-box">', unsafe_allow_html=True)
-            st.subheader("Table 4 — Tier 3 Insights")
+            st.subheader("Table 4 — Tier 3")
             t3_cols = ["Channel", "Type", "Language Purity", "Product Compatibility", "Risk Flags"]
             st.dataframe(df[t3_cols], use_container_width=True, hide_index=True)
-            st.download_button(
-                "⬇️ Download Table 4 CSV",
-                data=df[t3_cols].to_csv(index=False).encode("utf-8"),
-                file_name="table4_tier3.csv",
-                mime="text/csv",
-            )
             st.markdown("</div>", unsafe_allow_html=True)
 
         except Exception as e:
@@ -637,18 +569,31 @@ if st.session_state["mode"] == "discover":
 
 # ==================================================
 # EVALUATE A CHANNEL
-# (kept same as before)
+# - Add Table 1, Table 2 (Tier1), Table 3 (Tier2), Table 4 (Tier3)
 # ==================================================
 if st.session_state["mode"] == "evaluate":
     st.markdown('<div class="content-box">', unsafe_allow_html=True)
     st.subheader("✅ Evaluate a Channel")
+
+    # We need country+language here for Tier-3 language purity. Keep minimal but required.
+    c1, c2 = st.columns(2)
+    with c1:
+        country_eval = st.selectbox("Country (for language scoring)", list(COUNTRY_LANGUAGE_MAP.keys()), index=0, key="eval_country")
+    with c2:
+        language_eval = st.selectbox("Language (for language scoring)", COUNTRY_LANGUAGE_MAP.get(country_eval, ["English"]), index=0, key="eval_language")
+
     channel_input = st.text_input("Channel Name or URL", placeholder="Ex: Marques Brownlee or https://www.youtube.com/@mkbhd")
+    product_eval = st.text_input("Marketing Product (for fit scoring)", placeholder="Ex: phone, kitchen gadgets, skincare")
+
     run_eval = st.button("✅ Evaluate Channel", type="primary")
     st.markdown("</div>", unsafe_allow_html=True)
 
     if run_eval:
         if not channel_input.strip():
             st.warning("Please enter a channel name or URL.")
+            st.stop()
+        if not product_eval.strip():
+            st.warning("Please enter your marketing product (needed for Fit Score / Compatibility).")
             st.stop()
 
         status_area.markdown("<div class='status-box'>🔎 <b>Checking this channel with YouTube...</b> Results are on the way ✅</div>", unsafe_allow_html=True)
@@ -671,25 +616,67 @@ if st.session_state["mode"] == "evaluate":
                 st.error("Could not fetch channel details. Try again.")
                 st.stop()
 
+            # Compute all Tier insights for this single channel
+            eff_raw = a["avg_views"] / max(1.0, (a["subs"] / 1000.0))
+            cost_eff = "1.0x"  # single-channel baseline
+
+            row = {
+                "Channel": a["title"],
+                "Type": a["channel_type"],
+                "Subscribers": a["subs"],
+                "Avg Views": a["avg_views"],
+                "Engagement": f"{a['engagement_label']} ({a['engagement_ratio']:.3f})",
+                "Channel URL": a["url"],
+
+                "Fit Score": calc_fit_score(product_eval, a["title"], a["desc"], a["video_titles"]),
+                "Sponsorship Readiness": calc_sponsorship_readiness(a["engagement_ratio"], a["uploads_90d"], a["inactive_days"]),
+                "Cost Efficiency": cost_eff,
+
+                "Growth Momentum": calc_growth_momentum(a["views_list"]),
+                "Sponsor Saturation": calc_sponsor_saturation(a["video_titles"]),
+                "Audience Trust": calc_audience_trust(a["engagement_ratio"], a["views_list"]),
+
+                "Language Purity": f"{language_purity_percent(a['video_titles'], language_eval)}%",
+                "Product Compatibility": calc_product_compat(a["channel_type"], product_eval),
+                "Risk Flags": calc_risk_flags(a["engagement_ratio"], a["inactive_days"], a["uploads_90d"], a["views_list"]),
+            }
+
+            df_eval = pd.DataFrame([row])
+
             progress.progress(100)
             time.sleep(0.06)
             progress.empty()
             status_area.markdown("<div class='status-box'>✅ <b>Channel evaluation completed.</b></div>", unsafe_allow_html=True)
 
+            # TABLE 1 (Base)
             st.markdown('<div class="content-box">', unsafe_allow_html=True)
-            st.subheader("📌 Channel Summary")
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Subscribers", f"{a['subs']:,}")
-            c2.metric("Avg Views (Last 10)", f"{a['avg_views']:,}")
-            c3.metric("Engagement Score", f"{a['engagement_ratio']:.3f}")
-            c4.metric("Engagement Level", a["engagement_label"])
-            st.write(f"**Channel Name:** {a['title']}")
-            st.write(f"**Channel Type:** {a['channel_type']}")
-            st.write(f"**Total Views:** {a['total_views']:,}")
-            st.write("**Channel URL:**")
-            st.write(a["url"])
+            st.subheader("Table 1 — Base Channel Metrics")
+            base_cols = ["Channel", "Type", "Subscribers", "Avg Views", "Engagement", "Channel URL"]
+            st.dataframe(df_eval[base_cols], use_container_width=True, hide_index=True)
             st.markdown("</div>", unsafe_allow_html=True)
 
+            # TABLE 2 (Tier 1)
+            st.markdown('<div class="content-box">', unsafe_allow_html=True)
+            st.subheader("Table 2 — Tier 1")
+            t1_cols = ["Channel", "Type", "Fit Score", "Sponsorship Readiness", "Cost Efficiency"]
+            st.dataframe(df_eval[t1_cols], use_container_width=True, hide_index=True)
+            st.markdown("</div>", unsafe_allow_html=True)
+
+            # TABLE 3 (Tier 2)
+            st.markdown('<div class="content-box">', unsafe_allow_html=True)
+            st.subheader("Table 3 — Tier 2")
+            t2_cols = ["Channel", "Type", "Growth Momentum", "Sponsor Saturation", "Audience Trust"]
+            st.dataframe(df_eval[t2_cols], use_container_width=True, hide_index=True)
+            st.markdown("</div>", unsafe_allow_html=True)
+
+            # TABLE 4 (Tier 3)
+            st.markdown('<div class="content-box">', unsafe_allow_html=True)
+            st.subheader("Table 4 — Tier 3")
+            t3_cols = ["Channel", "Type", "Language Purity", "Product Compatibility", "Risk Flags"]
+            st.dataframe(df_eval[t3_cols], use_container_width=True, hide_index=True)
+            st.markdown("</div>", unsafe_allow_html=True)
+
+            # Optional: show recent titles
             st.markdown('<div class="content-box">', unsafe_allow_html=True)
             st.subheader("📺 Recent Video Titles (Last 10)")
             for t in a["video_titles"]:
